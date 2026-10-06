@@ -456,6 +456,10 @@
                         <div>
                             <label class="block text-gray-400 mb-1">Phrase secrète de chiffrement (jamais envoyée nulle part)</label>
                             <input type="password" id="drive-passphrase-input" placeholder="Au moins 8 caractères" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white text-[11px] focus:outline-none focus:border-blue-500">
+                            <label class="flex items-center gap-2 mt-2 text-[10px] text-gray-400 cursor-pointer">
+                                <input type="checkbox" id="drive-remember-passphrase" onchange="onToggleRememberPassphrase(this.checked)" class="accent-blue-500">
+                                Mémoriser la phrase sur cet appareil <span class="text-amber-500/80">(pratique pour Android, à éviter sur PC partagé)</span>
+                            </label>
                         </div>
                         <div class="flex gap-2">
                             <button onclick="connectDrive()" class="flex-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium">Se connecter à Drive</button>

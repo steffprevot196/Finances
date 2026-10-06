@@ -403,11 +403,29 @@ function renderDriveBackupList() {
     const backups = listLocalBackups();
     document.getElementById('local-backup-list').innerHTML = backups.length
         ? backups.map((b, i) => `
-            <div class="flex justify-between items-center p-2 bg-gray-950 border border-gray-800 rounded-lg text-[11px]">
-                <span class="text-gray-300">${b.label}</span>
-                <button onclick="restoreLocalBackup(${i})" class="px-2 py-1 rounded bg-gray-800 hover:bg-indigo-700 text-white text-[10px]">Restaurer</button>
+            <div class="flex justify-between items-center p-2 bg-gray-950 border border-gray-800 rounded-lg text-[11px] gap-2">
+                <span class="text-gray-300 truncate">${b.label}</span>
+                <span class="flex gap-1 flex-shrink-0">
+                    <button onclick="restoreLocalBackup(${i})" class="px-2 py-1 rounded bg-gray-800 hover:bg-indigo-700 text-white text-[10px]">Restaurer</button>
+                    <button onclick="deleteLocalBackup(${i})" class="px-2 py-1 rounded bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-[10px]" title="Supprimer cette sauvegarde">✕</button>
+                </span>
             </div>`).reverse().join('')
         : '<div class="text-gray-500 italic text-[11px]">Aucune sauvegarde locale pour le moment.</div>';
+}
+
+function deleteLocalBackup(index) {
+    const backups = listLocalBackups();
+    const b = backups[index];
+    if (!b) return;
+    if (!confirm(`Supprimer la sauvegarde "${b.label}" ? Cette action est irréversible.`)) return;
+    backups.splice(index, 1);
+    try {
+        localStorage.setItem('patriMonial_localBackups', JSON.stringify(backups));
+    } catch (err) {
+        alert('Suppression impossible : ' + err.message);
+        return;
+    }
+    renderDriveBackupList();
 }
 
 function saveDriveClientId() {
@@ -506,18 +524,106 @@ async function pushToDrive() {
 
 async function listDriveBackups() {
     try {
-        const res = await driveApiFetch('files?spaces=appDataFolder&fields=files(id,name,createdTime)&orderBy=createdTime desc&pageSize=20');
+        const res = await driveApiFetch('files?spaces=appDataFolder&fields=files(id,name,createdTime,size)&orderBy=createdTime desc&pageSize=50');
         const data = await res.json();
-        document.getElementById('drive-backup-list').innerHTML = (data.files || []).map(f => `
-            <div class="flex justify-between items-center p-2 bg-gray-950 border border-gray-800 rounded-lg text-[11px]">
-                <span class="text-gray-300">${f.name}</span>
-                <button onclick="pullFromDrive('${f.id}')" class="px-2 py-1 rounded bg-gray-800 hover:bg-indigo-700 text-white text-[10px]">Restaurer</button>
-            </div>`).join('')
-            || '<div class="text-gray-500 italic text-[11px]">Aucune sauvegarde sur Drive.</div>';
+        const files = data.files || [];
+
+        if (!files.length) {
+            document.getElementById('drive-backup-list').innerHTML = '<div class="text-gray-500 italic text-[11px]">Aucune sauvegarde sur Drive.</div>';
+            return;
+        }
+
+        // Le premier de la liste (le plus récent) est mis en avant
+        const [latest, ...rest] = files;
+
+        document.getElementById('drive-backup-list').innerHTML = `
+            <div class="p-2 bg-indigo-950/40 border border-indigo-800/60 rounded-lg text-[11px] space-y-1.5">
+                <div class="text-[10px] text-indigo-300 uppercase tracking-wider font-bold">Dernière sauvegarde</div>
+                <div class="text-gray-200 font-mono truncate">${latest.name}</div>
+                <div class="text-[10px] text-gray-500">${new Date(latest.createdTime).toLocaleString('fr-FR')}</div>
+                <button onclick="pullFromDrive('${latest.id}')" class="w-full px-2 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium">
+                    ⬇ Restaurer la dernière
+                </button>
+            </div>
+            ${rest.length ? `
+            <details class="text-[11px]">
+                <summary class="cursor-pointer text-gray-400 hover:text-white py-1">Voir les ${rest.length} sauvegardes précédentes</summary>
+                <div class="space-y-1.5 mt-1.5">
+                    ${rest.map(f => `
+                        <div class="flex justify-between items-center p-2 bg-gray-950 border border-gray-800 rounded-lg gap-2">
+                            <div class="min-w-0">
+                                <div class="text-gray-300 truncate font-mono">${f.name}</div>
+                                <div class="text-[9px] text-gray-500">${new Date(f.createdTime).toLocaleString('fr-FR')}</div>
+                            </div>
+                            <div class="flex gap-1 flex-shrink-0">
+                                <button onclick="pullFromDrive('${f.id}')" class="px-2 py-1 rounded bg-gray-800 hover:bg-indigo-700 text-white text-[10px]">Restaurer</button>
+                                <button onclick="deleteDriveBackup('${f.id}')" class="px-2 py-1 rounded bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-[10px]" title="Supprimer cette sauvegarde">✕</button>
+                            </div>
+                        </div>`).join('')}
+                </div>
+            </details>` : ''}
+        `;
     } catch (err) {
         document.getElementById('drive-backup-list').innerHTML = `<div class="text-rose-400 text-[11px]">${err.message}</div>`;
     }
 }
+
+async function deleteDriveBackup(fileId) {
+    if (!confirm('Supprimer définitivement cette sauvegarde sur Google Drive ?')) return;
+    try {
+        const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+            method: 'DELETE',
+            headers: { Authorization: 'Bearer ' + driveAccessToken }
+        });
+        if (!res.ok && res.status !== 204) throw new Error('HTTP ' + res.status);
+        listDriveBackups();
+    } catch (err) {
+        alert('Suppression impossible : ' + err.message);
+    }
+}
+
+// =====================================================================
+// MÉMORISATION OPT-IN DE LA PHRASE SECRÈTE (pratique pour Android)
+// =====================================================================
+function getStoredPassphrase() {
+    return localStorage.getItem('patriMonial_drivePassphrase') || '';
+}
+
+function setStoredPassphrase(p) {
+    if (p) localStorage.setItem('patriMonial_drivePassphrase', p);
+    else localStorage.removeItem('patriMonial_drivePassphrase');
+}
+
+function onToggleRememberPassphrase(checked) {
+    const input = document.getElementById('drive-passphrase-input');
+    const val = (input.value || '').trim();
+    if (checked) {
+        if (val.length < 8) {
+            alert('Saisissez d\'abord une phrase de 8 caractères minimum, puis cochez.');
+            document.getElementById('drive-remember-passphrase').checked = false;
+            return;
+        }
+        setStoredPassphrase(val);
+    } else {
+        setStoredPassphrase('');
+    }
+}
+
+// À l'ouverture du modal : pré-remplir la phrase si elle est mémorisée
+// et cocher la case correspondante. Ajout dans openDriveSyncModal.
+const _origOpenDriveSyncModal = openDriveSyncModal;
+openDriveSyncModal = function() {
+    _origOpenDriveSyncModal();
+    const stored = getStoredPassphrase();
+    const input = document.getElementById('drive-passphrase-input');
+    const check = document.getElementById('drive-remember-passphrase');
+    if (stored && input) {
+        input.value = stored;
+        if (check) check.checked = true;
+    } else if (input && check) {
+        check.checked = false;
+    }
+};
 
 async function pullFromDrive(fileId) {
     const passphrase = document.getElementById('drive-passphrase-input').value;
