@@ -14,7 +14,11 @@ function openPriceDB() {
     return new Promise((resolve, reject) => {
         if (!window.indexedDB) { reject(new Error('IndexedDB indisponible dans ce navigateur.')); return; }
         const req = indexedDB.open(PRICE_DB_NAME, 1);
-        req.onupgradeneeded = () => { req.result.createObjectStore(PRICE_DB_STORE); };
+        req.onupgradeneeded = () => {
+            if (!req.result.objectStoreNames.contains(PRICE_DB_STORE)) {
+                req.result.createObjectStore(PRICE_DB_STORE);
+            }
+        };
         req.onsuccess = () => resolve(req.result);
         req.onerror   = () => reject(req.error);
     });
@@ -24,8 +28,8 @@ async function priceDBGet(key) {
     const db = await openPriceDB();
     return new Promise((resolve, reject) => {
         const req = db.transaction(PRICE_DB_STORE, 'readonly').objectStore(PRICE_DB_STORE).get(key);
-        req.onsuccess = () => resolve(req.result || null);
-        req.onerror   = () => reject(req.error);
+        req.onsuccess = () => { db.close(); resolve(req.result || null); };
+        req.onerror   = () => { db.close(); reject(req.error); };
     });
 }
 
@@ -34,8 +38,9 @@ async function priceDBSet(key, value) {
     return new Promise((resolve, reject) => {
         const tx = db.transaction(PRICE_DB_STORE, 'readwrite');
         tx.objectStore(PRICE_DB_STORE).put(value, key);
-        tx.oncomplete = () => resolve();
-        tx.onerror    = () => reject(tx.error);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror    = () => { db.close(); reject(tx.error); };
+        tx.onabort    = () => { db.close(); reject(tx.error || new Error('Transaction aborted')); };
     });
 }
 
@@ -107,7 +112,11 @@ async function refreshRealPriceHistory() {
             (failed.length ? `\nÉchecs : ${failed.join(', ')}` : '') +
             '\n\nActions/ETF/Obligations : non disponible depuis un navigateur (Yahoo Finance bloque les requêtes CORS) — le calcul de risque continue d\'utiliser l\'historique de valorisation de votre portefeuille pour ces actifs.');
     }
-    renderInventoryTable();
+
+    // B5 : recharge le cache mémoire des volatilités réelles puis redessine.
+    // primeRealVolCache() appelle lui-même renderInventoryTable() et
+    // calculateRiskMetrics() en fin de traitement.
+    await primeRealVolCache();
 }
 
 // ---------------------------------------------------------------------
@@ -139,13 +148,13 @@ function primeRealVolCache() {
     });
     return Promise.all(keys.map(([k]) => priceDBGet(k).catch(() => null))).then(results => {
         results.forEach((r, i) => {
-            if (r) {
+            if (r && Array.isArray(r.series) && r.series.length >= 30) {
                 realVolCache[keys[i][1]]    = annualizedVolFromSeries(r.series);
                 realSeriesCache[keys[i][1]] = r.series;
             }
         });
-        renderInventoryTable();
-        calculateRiskMetrics();
+        if (typeof renderInventoryTable === 'function') renderInventoryTable();
+        if (typeof calculateRiskMetrics === 'function') calculateRiskMetrics();
     });
 }
 
@@ -155,10 +164,10 @@ function primeRealVolCache() {
 async function fetchLivePrices() {
     const btn  = document.getElementById('btn-live-prices');
     const icon = document.getElementById('icon-refresh-prices');
-    icon.classList.add('fa-spin');
-    btn.disabled = true;
+    if (icon) icon.classList.add('fa-spin');
+    if (btn)  btn.disabled = true;
 
-    const cryptoMap = CRYPTO_COINGECKO_IDS; // Correction 8 : utilise la constante globale
+    const cryptoMap = CRYPTO_COINGECKO_IDS;
     const currencyTickers = ['USD', 'JPY', 'CHF', 'GBP'];
     let updated = 0;
     const sourceErrors = [];
@@ -209,61 +218,71 @@ async function fetchLivePrices() {
         }
     } catch (err) { console.warn(err); }
 
+    // --- Actions / ETF (Finnhub) — DOIT s'exécuter AVANT les alertes ---
+    const updatedStockIds = new Set();
+    const stockAssets = assets.filter(a => (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto'));
+    if (stockAssets.length && finnhubApiKey) {
+        let stockUpdated = 0;
+        for (const a of stockAssets) {
+            const symbol = a.yahooTicker || a.ticker;
+            if (!symbol) continue;
+            try {
+                const price = await fetchFinnhubQuote(symbol);
+                if (price) {
+                    a.value = a.qty * price;
+                    upsertTodayHistoryPoint(a, a.value, a.invested);
+                    stockUpdated++;
+                    updatedStockIds.add(a.id);
+                }
+                await new Promise(r => setTimeout(r, 100));
+            } catch (err) {
+                sourceErrors.push(`${a.name} (${symbol}) : ${err.message}`);
+            }
+        }
+        if (stockUpdated > 0) updated += stockUpdated;
+    }
+
+    // --- Pièces AuCoffre : estimation via cours de l'or ---
+    try {
+        const auCoffreUpdated = await updateAuCoffreAssetsFromGoldPrice();
+        if (auCoffreUpdated > 0) updated += auCoffreUpdated;
+    } catch (err) { console.warn('AuCoffre update failed:', err); }
+
+    // --- Sauvegarde + rendu unique en fin de parcours ---
     if (updated > 0) {
         saveToStorage();
         refreshAllUI();
     }
 
+    // --- Restauration de l'UI AVANT les alertes ---
+    if (icon) icon.classList.remove('fa-spin');
+    if (btn)  btn.disabled = false;
+
+    // --- Alertes : APRÈS tous les fetch, une seule fois ---
     if (sourceErrors.length > 0) {
         const failedFetch = sourceErrors.some(e => /failed to fetch/i.test(e));
         alert(`Problème lors de l'actualisation automatique :\n${sourceErrors.join('\n')}` +
             (failedFetch
-                ? `\n\nSi le message contient "Failed to fetch", un bloqueur de publicité ou les Boucliers Brave/uBlock bloquent probablement api.coingecko.com / api.frankfurter.app sur ce site. Essayez de désactiver temporairement les Boucliers pour cette page, ou vérifiez votre connexion internet.`
+                ? `\n\nSi le message contient "Failed to fetch", un bloqueur de publicité ou les Boucliers Brave/uBlock bloquent probablement api.coingecko.com / api.frankfurter.dev / finnhub.io sur ce site. Essayez de désactiver temporairement les Boucliers pour cette page, ou vérifiez votre connexion internet.`
                 : ''));
     } else if (updated > 0) {
-        alert(`Cours actualisés automatiquement pour ${updated} actif(s) (crypto/devises).`);
+        alert(`Cours actualisés automatiquement pour ${updated} actif(s) (crypto, devises, actions/ETF, or).`);
     }
 
-        // --- Actions / ETF (Finnhub) ---
-        const stockAssets = assets.filter(a => (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto'));
-        if (stockAssets.length && finnhubApiKey) {
-            let stockUpdated = 0;
-            for (const a of stockAssets) {
-                const symbol = a.yahooTicker || a.ticker;
-                if (!symbol) continue;
-                try {
-                    const price = await fetchFinnhubQuote(symbol);
-                    if (price) {
-                        a.value = a.qty * price;
-                        upsertTodayHistoryPoint(a, a.value, a.invested);
-                        stockUpdated++;
-                    }
-                    await new Promise(r => setTimeout(r, 100));
-                } catch (err) { sourceErrors.push(`${a.name} (${symbol}) : ${err.message}`); }
-            }
-            if (stockUpdated > 0) {
-                updated += stockUpdated;
-                saveToStorage();
-                refreshAllUI();
-            }
-        }
-    
-        // --- Pièces AuCoffre : estimation via cours de l'or (Partie 4.3) ---
-        const auCoffreUpdated = await updateAuCoffreAssetsFromGoldPrice();
-        if (auCoffreUpdated > 0) updated += auCoffreUpdated;
-    
-        // Mise à jour manuelle groupée pour tout le reste
-        const autoUpdatedIds = new Set(
-        assets.filter(a =>
-            (hasTag(a, 'Crypto') && cryptoMap[a.ticker.toUpperCase()]) ||
-            (hasTag(a, 'Devises/Liquidités') && currencyTickers.includes(a.ticker.toUpperCase()))
-        ).map(a => a.id)
+    // --- Mise à jour manuelle groupée pour tout le reste ---
+    // Les actifs déjà mis à jour automatiquement (crypto, devises, actions/ETF) sont exclus.
+    const autoUpdatedIds = new Set(
+        assets
+            .filter(a =>
+                (hasTag(a, 'Crypto') && cryptoMap[a.ticker.toUpperCase()]) ||
+                (hasTag(a, 'Devises/Liquidités') && currencyTickers.includes(a.ticker.toUpperCase()))
+            )
+            .map(a => a.id)
     );
+    updatedStockIds.forEach(id => autoUpdatedIds.add(id));
+
     const manualAssets = assets.filter(a => !autoUpdatedIds.has(a.id));
     if (manualAssets.length) openManualRefreshModal(manualAssets);
-
-    icon.classList.remove('fa-spin');
-    btn.disabled = false;
 }
 
 // ---------------------------------------------------------------------
@@ -274,8 +293,8 @@ function openManualRefreshModal(manualAssets) {
         const unitValue = a.qty ? (a.value / a.qty) : a.value;
         return `<div class="grid grid-cols-[1fr_auto] items-center gap-3 p-2 bg-gray-950 border border-gray-800 rounded-lg" data-asset-id="${a.id}" data-qty="${a.qty}" data-invested="${a.invested}">
             <div class="min-w-0">
-                <div class="font-bold text-white truncate">${a.name}</div>
-                <div class="text-[10px] text-gray-500 font-mono">${a.ticker} • Qté ${a.qty} • Valeur actuelle : ${formatEUR(a.value)}</div>
+                <div class="font-bold text-white truncate">${escapeHTML(a.name)}</div>
+                <div class="text-[10px] text-gray-500 font-mono">${escapeHTML(a.ticker)} • Qté ${fmtQty(a.qty)} • Valeur actuelle : ${formatEUR(a.value)}</div>
             </div>
             <div class="flex items-center gap-1.5">
                 <span class="text-[10px] text-gray-500">Nouv. valeur unitaire</span>
@@ -355,38 +374,36 @@ let driveAccessToken  = null;
 function getDriveClientId()    { return localStorage.getItem('patriMonial_driveClientId') || ''; }
 function setDriveClientId(id)  { localStorage.setItem('patriMonial_driveClientId', id.trim()); }
 
-// --- Chiffrement AES-GCM 256 / PBKDF2 (Web Crypto API, natif du navigateur) ---
-async function deriveAESKey(passphrase, saltBytes) {
-    const enc = new TextEncoder();
-    const baseKey = await crypto.subtle.importKey(
-        'raw', enc.encode(passphrase), 'PBKDF2', false, ['deriveKey']
-    );
-    return crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt: saltBytes, iterations: 250000, hash: 'SHA-256' },
-        baseKey,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt', 'decrypt']
-    );
-}
-
+// --- Chiffrement AES-GCM 256 (clé maîtresse non-extractible) ---
+// Format v2 : plus de sel dans l'enveloppe — le sel est propre à la clé
+// mémorisée (une seule dérivation PBKDF2 par appareil, pas par sauvegarde).
+// Format v1 reste déchiffrable pour la compatibilité avec les anciennes
+// sauvegardes Drive (schéma d'origine : sel par enveloppe).
 async function encryptPayload(obj, passphrase) {
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const iv   = crypto.getRandomValues(new Uint8Array(12));
-    const key  = await deriveAESKey(passphrase, salt);
-    const data = new TextEncoder().encode(JSON.stringify(obj));
-    const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, data);
-    const toB64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
-    return { v: 1, salt: toB64(salt), iv: toB64(iv), data: toB64(cipher) };
+    const { key } = await getOrCreateMasterKey(passphrase);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const cipher = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(obj))
+    );
+    const toB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+    return { v: 2, iv: toB64(iv), data: toB64(cipher) };
 }
 
 async function decryptPayload(envelope, passphrase) {
-    const fromB64 = (s) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
-    const key = await deriveAESKey(passphrase, fromB64(envelope.salt));
+    const fromB64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+
+    // Compatibilité avec les sauvegardes v1 (ancien format, sel par enveloppe)
+    if (envelope.v === 1 && envelope.salt) {
+        const key = await deriveMasterKey(passphrase, fromB64(envelope.salt));
+        const plain = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: fromB64(envelope.iv) }, key, fromB64(envelope.data)
+        );
+        return JSON.parse(new TextDecoder().decode(plain));
+    }
+
+    const { key } = await getOrCreateMasterKey(passphrase);
     const plain = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: fromB64(envelope.iv) },
-        key,
-        fromB64(envelope.data)
+        { name: 'AES-GCM', iv: fromB64(envelope.iv) }, key, fromB64(envelope.data)
     );
     return JSON.parse(new TextDecoder().decode(plain));
 }
@@ -404,7 +421,7 @@ function renderDriveBackupList() {
     document.getElementById('local-backup-list').innerHTML = backups.length
         ? backups.map((b, i) => `
             <div class="flex justify-between items-center p-2 bg-gray-950 border border-gray-800 rounded-lg text-[11px] gap-2">
-                <span class="text-gray-300 truncate">${b.label}</span>
+                <span class="text-gray-300 truncate">${escapeHTML(b.label)}</span>
                 <span class="flex gap-1 flex-shrink-0">
                     <button onclick="restoreLocalBackup(${i})" class="px-2 py-1 rounded bg-gray-800 hover:bg-indigo-700 text-white text-[10px]">Restaurer</button>
                     <button onclick="deleteLocalBackup(${i})" class="px-2 py-1 rounded bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-[10px]" title="Supprimer cette sauvegarde">✕</button>
@@ -441,6 +458,14 @@ function initDriveSyncUI() {
     const finnhubStatus = document.getElementById('finnhub-status');
     if (finnhubInput) finnhubInput.value = finnhubApiKey;
     if (finnhubStatus) finnhubStatus.innerText = finnhubApiKey ? '✅ Clé enregistrée' : '⚠️ Aucune clé';
+
+    // Met à jour le libellé du champ mot de passe si une clé est déjà mémorisée
+    hasStoredMasterKey().then(has => {
+        const input = document.getElementById('drive-passphrase-input');
+        if (input && has) {
+            input.placeholder = 'Clé mémorisée — laissez vide pour utiliser la clé stockée';
+        }
+    });
 }
 
 function updateDriveSyncStatus() {
@@ -498,11 +523,21 @@ async function driveApiFetch(path, options = {}) {
 }
 
 async function pushToDrive() {
-    const passphrase = document.getElementById('drive-passphrase-input').value;
-    if (!passphrase || passphrase.length < 8) {
+    let passphrase = document.getElementById('drive-passphrase-input').value;
+    const hasKey = await hasStoredMasterKey();
+
+    if (!passphrase && !hasKey) {
         alert('Choisissez une phrase secrète d\'au moins 8 caractères (elle seule permet de déchiffrer vos données — Google ne la connaît pas et ne peut pas la récupérer).');
         return;
     }
+    if (passphrase && passphrase.length < 8) {
+        alert('La phrase secrète doit contenir au moins 8 caractères.');
+        return;
+    }
+    // Si aucune phrase n'est saisie mais qu'une clé est mémorisée, on utilise
+    // une chaîne sentinelle qui sera ignorée par getOrCreateMasterKey.
+    if (!passphrase && hasKey) passphrase = '__cached__';
+
     try {
         const envelope = await encryptPayload(currentDataSnapshot(), passphrase);
         const metadata = { name: 'patrimonial-backup-' + Date.now() + '.json', parents: ['appDataFolder'] };
@@ -539,7 +574,7 @@ async function listDriveBackups() {
         document.getElementById('drive-backup-list').innerHTML = `
             <div class="p-2 bg-indigo-950/40 border border-indigo-800/60 rounded-lg text-[11px] space-y-1.5">
                 <div class="text-[10px] text-indigo-300 uppercase tracking-wider font-bold">Dernière sauvegarde</div>
-                <div class="text-gray-200 font-mono truncate">${latest.name}</div>
+                <div class="text-gray-200 font-mono truncate">${escapeHTML(latest.name)}</div>
                 <div class="text-[10px] text-gray-500">${new Date(latest.createdTime).toLocaleString('fr-FR')}</div>
                 <button onclick="pullFromDrive('${latest.id}')" class="w-full px-2 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium">
                     ⬇ Restaurer la dernière
@@ -552,7 +587,7 @@ async function listDriveBackups() {
                     ${rest.map(f => `
                         <div class="flex justify-between items-center p-2 bg-gray-950 border border-gray-800 rounded-lg gap-2">
                             <div class="min-w-0">
-                                <div class="text-gray-300 truncate font-mono">${f.name}</div>
+                                <div class="text-gray-300 truncate font-mono">${escapeHTML(f.name)}</div>
                                 <div class="text-[9px] text-gray-500">${new Date(f.createdTime).toLocaleString('fr-FR')}</div>
                             </div>
                             <div class="flex gap-1 flex-shrink-0">
@@ -583,51 +618,127 @@ async function deleteDriveBackup(fileId) {
 }
 
 // =====================================================================
-// MÉMORISATION OPT-IN DE LA PHRASE SECRÈTE (pratique pour Android)
+// GESTION DE LA CLÉ MAÎTRESSE (Option A)
 // =====================================================================
-function getStoredPassphrase() {
-    return localStorage.getItem('patriMonial_drivePassphrase') || '';
+// La phrase secrète n'est PLUS stockée en clair. À la première saisie sur
+// un appareil, une CryptoKey AES-GCM est dérivée (PBKDF2 250 000 itérations)
+// avec extractable=false, puis mémorisée dans IndexedDB : elle devient
+// physiquement impossible à exporter (crypto.subtle.exportKey échoue).
+// Elle reste utilisable tant que la page est ouverte, mais aucun script
+// malveillant ne peut la copier pour l'emporter hors du navigateur.
+// =====================================================================
+const KEY_DB_NAME  = 'patriMonialKeys';
+const KEY_DB_STORE = 'keys';
+const KEY_WITNESS  = 'patrimonial-master-key-v1';
+
+function openKeyDB() {
+    return new Promise((resolve, reject) => {
+        if (!window.indexedDB) { reject(new Error('IndexedDB indisponible.')); return; }
+        const req = indexedDB.open(KEY_DB_NAME, 1);
+        req.onupgradeneeded = () => {
+            if (!req.result.objectStoreNames.contains(KEY_DB_STORE)) {
+                req.result.createObjectStore(KEY_DB_STORE);
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror   = () => reject(req.error);
+    });
+}
+async function keyDBGet(k) {
+    const db = await openKeyDB();
+    return new Promise((resolve, reject) => {
+        const r = db.transaction(KEY_DB_STORE, 'readonly').objectStore(KEY_DB_STORE).get(k);
+        r.onsuccess = () => { db.close(); resolve(r.result || null); };
+        r.onerror   = () => { db.close(); reject(r.error); };
+    });
+}
+async function keyDBSet(k, v) {
+    const db = await openKeyDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(KEY_DB_STORE, 'readwrite');
+        tx.objectStore(KEY_DB_STORE).put(v, k);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror    = () => { db.close(); reject(tx.error); };
+    });
+}
+async function keyDBDelete(k) {
+    const db = await openKeyDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(KEY_DB_STORE, 'readwrite');
+        tx.objectStore(KEY_DB_STORE).delete(k);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror    = () => { db.close(); reject(tx.error); };
+    });
 }
 
-function setStoredPassphrase(p) {
-    if (p) localStorage.setItem('patriMonial_drivePassphrase', p);
-    else localStorage.removeItem('patriMonial_drivePassphrase');
+async function deriveMasterKey(passphrase, salt) {
+    const base = await crypto.subtle.importKey(
+        'raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey']
+    );
+    return crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt, iterations: 250000, hash: 'SHA-256' },
+        base,
+        { name: 'AES-GCM', length: 256 },
+        false,                                        // ← non-extractible
+        ['encrypt', 'decrypt']
+    );
 }
 
-function onToggleRememberPassphrase(checked) {
-    const input = document.getElementById('drive-passphrase-input');
-    const val = (input.value || '').trim();
-    if (checked) {
-        if (val.length < 8) {
-            alert('Saisissez d\'abord une phrase de 8 caractères minimum, puis cochez.');
-            document.getElementById('drive-remember-passphrase').checked = false;
-            return;
-        }
-        setStoredPassphrase(val);
-    } else {
-        setStoredPassphrase('');
+// Récupère la clé mémorisée (si elle correspond à la phrase fournie),
+// sinon la dérive et la mémorise. Retourne { key, isNew }.
+async function getOrCreateMasterKey(passphrase) {
+    const stored = await keyDBGet('driveMasterKey');
+    if (stored && stored.key) {
+        try {
+            const probe = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv: new Uint8Array(stored.witnessIv) },
+                stored.key,
+                new Uint8Array(stored.witness)
+            );
+            if (new TextDecoder().decode(probe) === KEY_WITNESS) {
+                return { key: stored.key, isNew: false };
+            }
+        } catch { /* phrase différente → nouvelle dérivation */ }
     }
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const key  = await deriveMasterKey(passphrase, salt);
+    const iv   = crypto.getRandomValues(new Uint8Array(12));
+    const witness = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv }, key, new TextEncoder().encode(KEY_WITNESS)
+    );
+    await keyDBSet('driveMasterKey', {
+        key,
+        salt: Array.from(salt),
+        witness: Array.from(new Uint8Array(witness)),
+        witnessIv: Array.from(iv),
+        createdAt: Date.now()
+    });
+    return { key, isNew: true };
 }
 
-// À l'ouverture du modal : pré-remplir la phrase si elle est mémorisée
-// et cocher la case correspondante. Ajout dans openDriveSyncModal.
-const _origOpenDriveSyncModal = openDriveSyncModal;
-openDriveSyncModal = function() {
-    _origOpenDriveSyncModal();
-    const stored = getStoredPassphrase();
+// Retourne true si une clé est déjà mémorisée sur cet appareil.
+async function hasStoredMasterKey() {
+    const stored = await keyDBGet('driveMasterKey');
+    return !!(stored && stored.key);
+}
+
+// Efface la clé mémorisée (bouton "Oublier la phrase").
+async function forgetMasterKey() {
+    if (!confirm('Oublier la phrase secrète mémorisée sur cet appareil ?\nVous devrez la ressaisir pour vos prochaines sauvegardes Drive.')) return;
+    await keyDBDelete('driveMasterKey');
     const input = document.getElementById('drive-passphrase-input');
-    const check = document.getElementById('drive-remember-passphrase');
-    if (stored && input) {
-        input.value = stored;
-        if (check) check.checked = true;
-    } else if (input && check) {
-        check.checked = false;
-    }
-};
+    if (input) input.value = '';
+    alert('Phrase oubliée. La clé de chiffrement locale a été effacée.');
+}
 
 async function pullFromDrive(fileId) {
-    const passphrase = document.getElementById('drive-passphrase-input').value;
-    if (!passphrase) { alert('Saisissez la phrase secrète utilisée lors de l\'envoi.'); return; }
+    let passphrase = document.getElementById('drive-passphrase-input').value;
+    const hasKey = await hasStoredMasterKey();
+    if (!passphrase && !hasKey) {
+        alert('Saisissez la phrase secrète utilisée lors de l\'envoi.');
+        return;
+    }
+    if (!passphrase && hasKey) passphrase = '__cached__';
     try {
         const res = await driveApiFetch(`files/${fileId}?alt=media`);
         const envelope = await res.json();

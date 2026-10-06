@@ -185,6 +185,30 @@ function formatEUR(v) {
     return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v || 0);
 }
 
+// --- Sécurité : échappement HTML pour les données importables (protection XSS) ---
+function escapeHTML(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+// --- Formatage des quantités (grands nombres crypto, fractions d'onces…) ---
+function fmtQty(q) {
+    return new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 8 }).format(q || 0);
+}
+
+// --- Debounce générique (limite la fréquence d'appel des API externes) ---
+function debounce(fn, delay = 300) {
+    let timer = null;
+    return function (...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
 function envelopeShort(code) {
     return code && ENVELOPPES[code] ? ENVELOPPES[code].short : '';
 }
@@ -413,13 +437,16 @@ function cadranLabel(code) {
 
 function cadranBadgeHTML(code) {
     const cls = CADRAN_BADGE_COLORS[code] || CADRAN_BADGE_COLORS.HORS_GAVE;
-    return `<span class="px-2 py-0.5 rounded border text-[10px] font-bold whitespace-nowrap ${cls}">${cadranLabel(code)}</span>`;
+    return `<span class="px-2 py-0.5 rounded border text-[10px] font-bold whitespace-nowrap ${cls}">${escapeHTML(cadranLabel(code))}</span>`;
 }
 
 function cadranSelectHTML(assetId, currentCadran) {
-    const opts = [...GAVE_QUADRANTS, 'CRYPTO', 'HORS_GAVE'].map(code =>
-        `<option value="${code}" ${code === currentCadran ? 'selected' : ''}>${code === 'HORS_GAVE' ? 'Hors-Cadran' : (code === 'CRYPTO' ? 'Cryptomonnaies' : `Cadran ${CADRAN_NUM[code]} : ${cadranLabel(code)}`)}</option>`
-    ).join('');
+    const opts = [...GAVE_QUADRANTS, 'CRYPTO', 'HORS_GAVE'].map(code => {
+        const label = code === 'HORS_GAVE'
+            ? 'Hors-Cadran'
+            : (code === 'CRYPTO' ? 'Cryptomonnaies' : `Cadran ${CADRAN_NUM[code]} : ${cadranLabel(code)}`);
+        return `<option value="${code}" ${code === currentCadran ? 'selected' : ''}>${escapeHTML(label)}</option>`;
+    }).join('');
     return `<select onchange="reassignAssetCadran(${assetId}, this.value)" class="bg-gray-950 border border-gray-800 rounded-md px-1.5 py-1 text-[10px] text-white focus:outline-none focus:border-indigo-500">${opts}</select>`;
 }
 // =====================================================================
@@ -758,7 +785,7 @@ function handleImportJSON(e) {
                 newArbitrages = Array.isArray(parsed.data.arbitrages) ? parsed.data.arbitrages : [];
                 newCadranNames = parsed.data.cadranNames || CADRAN_DEFAULT_NAMES;
                 newTaxMode = parsed.data.taxRegimeMode || 'PFU';
-                newTaxTMI = typeof parsed.data.taxTMI === 'number' ? parsed.data.taxTMI : 0.30;
+                newTaxTMI = Number.isFinite(parseFloat(parsed.data.taxTMI)) ? parseFloat(parsed.data.taxTMI) : 0.30;
             } else {
                 throw new Error('Le fichier JSON n\'est ni un tableau d\'actifs ni un export complet PatriMonial.');
             }

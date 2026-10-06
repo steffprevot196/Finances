@@ -168,7 +168,7 @@ function renderQuadrantModalContent(q) {
         const lIsPos = lpnl >= 0;
         const part = totalValue > 0 ? (a.value || 0) / totalValue * 100 : 0;
         return `<tr>
-            <td class="p-2.5"><div class="font-bold text-white">${a.name}</div><div class="text-[10px] text-gray-500">${a.ticker}</div></td>
+            <td class="p-2.5"><div class="font-bold text-white">${escapeHTML(a.name)}</div><div class="text-[10px] text-gray-500">${escapeHTML(a.ticker)}</div></td>
             <td class="p-2.5 text-right">${formatEUR(a.invested)}</td>
             <td class="p-2.5 text-right text-white font-bold">${formatEUR(a.value)}</td>
             <td class="p-2.5 text-right ${lIsPos ? 'text-emerald-400' : 'text-rose-400'}">${lIsPos ? '+' : ''}${formatEUR(lpnl)} (${lIsPos ? '+' : ''}${(a.invested > 0 ? lpnl / a.invested * 100 : 0).toFixed(1)}%)</td>
@@ -300,7 +300,9 @@ function toggleCompareMode() {
 
     if (compareActive) {
         const groups = getSegmentGroups();
-        const optsHTML = groups.map(g => `<option value="${g.code}">${g.label}</option>`).join('');
+        const optsHTML = groups.map(g =>
+            `<option value="${escapeHTML(g.code)}">${escapeHTML(g.label)}</option>`
+        ).join('');
         const selA = document.getElementById('compare-select-a');
         const selB = document.getElementById('compare-select-b');
         selA.innerHTML = `<option value="">-- Choisir --</option>${optsHTML}`;
@@ -354,8 +356,8 @@ function renderComparePanel(side) {
     panel.innerHTML = `
         <div class="flex justify-between items-start">
             <div>
-                <div class="text-[10px] text-gray-500 uppercase">Segment ${side}</div>
-                <div class="font-bold text-white text-sm">${groupLabel}</div>
+                <div class="text-[10px] text-gray-500 uppercase">Segment ${escapeHTML(side)}</div>
+                <div class="font-bold text-white text-sm">${escapeHTML(groupLabel)}</div>
                 <div class="text-[10px] text-gray-500">${segAssets.length} actif(s)</div>
             </div>
             <div class="text-right">
@@ -380,7 +382,7 @@ function renderComparePanel(side) {
         </div>
         <div id="compare-risk-${side}" class="grid grid-cols-3 gap-2 text-center"></div>
         <div class="max-h-32 overflow-y-auto space-y-1 border-t border-gray-800 pt-2">
-            ${segAssets.map(a => `<div class="flex justify-between text-[10px] py-0.5"><span class="text-gray-400 truncate">${a.name}</span><span class="font-mono text-gray-300 whitespace-nowrap ml-2">${formatEUR(a.value)}</span></div>`).join('')}
+            ${segAssets.map(a => `<div class="flex justify-between text-[10px] py-0.5"><span class="text-gray-400 truncate">${escapeHTML(a.name)}</span><span class="font-mono text-gray-300 whitespace-nowrap ml-2">${formatEUR(a.value)}</span></div>`).join('')}
         </div>
         `}
     `;

@@ -130,6 +130,7 @@ function openAddAssetModal() {
     document.getElementById('add-value-wrap').classList.add('hidden');
     document.getElementById('add-value').removeAttribute('required');
     document.getElementById('add-value').value = '';
+    _addValueTouched = false;
     document.getElementById('add-purchase-date').value = new Date().toISOString().slice(0, 10);
     document.getElementById('add-broker').value = '';
     document.getElementById('add-bond-coupon').value = '';
@@ -163,6 +164,7 @@ function openEditAssetModal(id) {
     document.getElementById('add-frais').value = asset.frais || 0;
     document.getElementById('add-value-wrap').classList.remove('hidden');
     document.getElementById('add-value').setAttribute('required', 'required');
+        _addValueTouched = true;   // en édition, la valeur existante ne doit pas être écrasée
     document.getElementById('add-value').value = asset.qty
         ? (asset.value / asset.qty).toFixed(4)
         : asset.value;
@@ -192,12 +194,16 @@ function openEditAssetModal(id) {
 
 // ---------------------------------------------------------------------
 // Recalcul automatique du total (quantité × prix)
+// Le flag _addValueTouched empêche d'écraser une valeur saisie
+// intentionnellement par l'utilisateur (y compris 0).
 // ---------------------------------------------------------------------
+let _addValueTouched = false;
+
 function recalculateAddTotals() {
-    const qty   = parseFloat(document.getElementById('add-qty').value) || 0;
+    if (_addValueTouched) return;
     const price = parseFloat(document.getElementById('add-price').value) || 0;
     const valueInput = document.getElementById('add-value');
-    if (!valueInput.value || valueInput.value == '0') {
+    if (valueInput && !valueInput.value) {
         valueInput.value = price.toFixed(4);
     }
 }
@@ -293,6 +299,19 @@ function handleAddAsset(e) {
             if (bond) Object.assign(asset, bond);
             else { delete asset.coupon; delete asset.maturity; delete asset.rating; delete asset.nominal; }
             normalizeAsset(asset);
+
+            // B15 : resynchronise `buys` avec l'état réel des lots restants
+            const totalQtyRestant = (asset.lots || []).reduce((s, l) => s + (l.qtyRemaining || 0), 0);
+            const costRestant = (asset.lots || []).reduce((s, l) => s + (l.qtyRemaining || 0) * (l.price || 0), 0);
+            asset.buys = [{
+                date: purchaseDateFR,
+                type: 'Achat Initial (édité)',
+                qty: totalQtyRestant,
+                price: totalQtyRestant > 0 ? costRestant / totalQtyRestant : 0,
+                frais: asset.frais || 0,
+                total: asset.invested
+            }];
+
             upsertTodayHistoryPoint(asset, value, invested);
         }
     } else {
@@ -525,10 +544,10 @@ function renderSearchResults(results) {
         div.innerHTML = `
             <div>
                 <div class="font-bold text-white flex items-center gap-2">
-                    ${item.name}
-                    <span class="text-[9px] px-1.5 py-0.5 rounded border font-mono ${item.badgeColor}">${item.badge}</span>
+                    ${escapeHTML(item.name)}
+                    <span class="text-[9px] px-1.5 py-0.5 rounded border font-mono ${item.badgeColor}">${escapeHTML(item.badge)}</span>
                 </div>
-                <div class="text-[10px] text-gray-400 font-mono">${item.ticker} • ${item.category}</div>
+                <div class="text-[10px] text-gray-400 font-mono">${escapeHTML(item.ticker)} • ${escapeHTML(item.category || '')}</div>
             </div>
             <div class="text-right font-mono font-bold text-emerald-400">
                 ${formatEUR(item.priceEUR)}
@@ -595,8 +614,8 @@ function goToSellStep2() {
     list.innerHTML = eligible.length ? eligible.map(a => `
         <div onclick="selectAssetToSell(${a.id})" class="clickable-row flex justify-between items-center p-2.5 bg-gray-950 border border-gray-800 rounded-lg cursor-pointer hover:border-rose-700">
             <div>
-                <div class="font-bold text-white">${a.name}</div>
-                <div class="text-[10px] text-gray-500 font-mono">${a.ticker} • Qté ${a.qty} • Frais ${formatEUR(a.frais || 0)}</div>
+                <div class="font-bold text-white">${escapeHTML(a.name)}</div>
+                <div class="text-[10px] text-gray-500 font-mono">${escapeHTML(a.ticker)} • Qté ${fmtQty(a.qty)} • Frais ${formatEUR(a.frais || 0)}</div>
             </div>
             <div class="text-right font-mono"><div class="font-bold text-white">${formatEUR(a.value)}</div></div>
         </div>`).join('')
@@ -626,7 +645,7 @@ function openAddCessionModal() {
 
     const sourceSelect = document.getElementById('cession-source-asset');
     sourceSelect.innerHTML = '<option value="">-- Saisie libre --</option>' +
-        assets.map(a => `<option value="${a.id}">${a.name} (${a.ticker})</option>`).join('');
+        assets.map(a => `<option value="${a.id}">${escapeHTML(a.name)} (${escapeHTML(a.ticker)})</option>`).join('');
     sourceSelect.value = '';
 
     populateCessionEnvelopeOptions();
@@ -722,40 +741,27 @@ function prefillCessionFromAsset() {
 
 // Affiche le sélecteur de pièce nominative si l'actif a plusieurs lots référencés
 function renderCessionLotPicker(asset) {
-    const wrap = document.getElementById('cession-lot-picker-wrap');
+    const wrap   = document.getElementById('cession-lot-picker-wrap');
     const picker = document.getElementById('cession-lot-picker');
-    if (!wrap || !picker) return;
+    const hidden = document.getElementById('cession-lot-id-hidden');
+    if (!wrap || !picker || !hidden) return;
 
     const lotsDispos = (asset.lots || []).filter(l => (l.qtyRemaining || 0) > 0 && l.reference);
-    const tousLotsDispos = (asset.lots || []).filter(l => (l.qtyRemaining || 0) > 0);
 
     // Cas 1 : pas de référence nominative → on cache et on utilise le FIFO
     if (lotsDispos.length === 0) {
         wrap.classList.add('hidden');
         picker.innerHTML = '';
-        // Reset du champ caché de sélection
-        if (!document.getElementById('cession-lot-id-hidden')) {
-            const h = document.createElement('input');
-            h.type = 'hidden';
-            h.id = 'cession-lot-id-hidden';
-            h.value = '';
-            document.getElementById('modal-add-cession').appendChild(h);
-        } else {
-            document.getElementById('cession-lot-id-hidden').value = '';
-        }
+        hidden.value = '';
+        const qtyInput = document.getElementById('cession-qty');
+        qtyInput.removeAttribute('readonly');
+        qtyInput.classList.remove('opacity-60', 'cursor-not-allowed');
+        qtyInput.oninput = onCessionQtyChange;
         return;
     }
 
     // Cas 2 : au moins un lot avec référence → on affiche le sélecteur
     wrap.classList.remove('hidden');
-    if (!document.getElementById('cession-lot-id-hidden')) {
-        const h = document.createElement('input');
-        h.type = 'hidden';
-        h.id = 'cession-lot-id-hidden';
-        h.value = '';
-        document.getElementById('modal-add-cession').appendChild(h);
-    }
-
     picker.innerHTML = lotsDispos.map((lot, i) => {
         const dateStr = lot.date ? new Date(lot.date).toLocaleDateString('fr-FR') : '—';
         const prixStr = formatEUR(lot.price || 0);
@@ -763,9 +769,9 @@ function renderCessionLotPicker(asset) {
             <label class="flex items-start gap-2 p-2 bg-gray-950 border border-gray-800 rounded-lg cursor-pointer hover:border-indigo-500 transition">
                 <input type="radio" name="cession-lot-radio" value="${lot.id}" ${i === 0 ? 'checked' : ''} class="mt-0.5 accent-indigo-500" onchange="onCessionLotChange()">
                 <span class="flex-1 min-w-0">
-                    <span class="block text-[11px] font-bold text-white font-mono truncate">Réf. ${lot.reference}</span>
+                    <span class="block text-[11px] font-bold text-white font-mono truncate">Réf. ${escapeHTML(lot.reference)}</span>
                     <span class="block text-[10px] text-gray-400">
-                        Achetée le ${dateStr} · ${prixStr} / unité · Disponible : ${lot.qtyRemaining}
+                        Achetée le ${dateStr} · ${prixStr} / unité · Disponible : ${fmtQty(lot.qtyRemaining)}
                     </span>
                 </span>
             </label>`;
@@ -773,10 +779,12 @@ function renderCessionLotPicker(asset) {
 
     // Sélectionne par défaut le premier lot et force la quantité à 1
     const firstLot = lotsDispos[0];
-    document.getElementById('cession-lot-id-hidden').value = firstLot.id;
-    document.getElementById('cession-qty').value = 1;
-    document.getElementById('cession-qty').setAttribute('readonly', 'readonly');
-    document.getElementById('cession-qty').classList.add('opacity-60', 'cursor-not-allowed');
+    hidden.value = firstLot.id;
+    const qtyInput = document.getElementById('cession-qty');
+    qtyInput.value = 1;
+    qtyInput.setAttribute('readonly', 'readonly');
+    qtyInput.classList.add('opacity-60', 'cursor-not-allowed');
+    qtyInput.oninput = null;
 
     // Pré-remplit date achat et prix achat depuis ce lot
     document.getElementById('cession-date-achat').value = firstLot.date || '';
@@ -981,68 +989,91 @@ function handleAddCession(e) {
         coupons: parseFloat(document.getElementById('cession-coupons').value) || 0
     });
 
-    
+    // --- ÉTAPE 1 : VALIDER et SIMULER la consommation des lots AVANT toute mutation ---
+    let assetToModify = null;
+    let qtyToSell = 0;
+    const sourceAssetId = parseFloat(document.getElementById('cession-source-asset').value);
 
-        if (editId) {
+    if (!editId && sourceAssetId) {
+        assetToModify = assets.find(a => a.id === sourceAssetId);
+        if (!assetToModify) {
+            alert('Actif source introuvable.');
+            return;
+        }
+        qtyToSell = parseFloat(document.getElementById('cession-qty').value) || assetToModify.qty;
+        if (qtyToSell > assetToModify.qty) {
+            alert(`Quantité invalide : ${qtyToSell} demandées, ${assetToModify.qty} disponibles.`);
+            return;
+        }
+
+        const selectedLotId = document.getElementById('cession-lot-id-hidden')?.value || '';
+        const dryRun = selectedLotId
+            ? consumeLotById(assetToModify, selectedLotId, qtyToSell)
+            : consumeFIFO(assetToModify, qtyToSell);
+
+        if (dryRun.error) {
+            alert(dryRun.error);
+            return;
+        }
+        // Rollback : on restaure les lots tels qu'ils étaient avant le dry-run
+        // (consumeFIFO/consumeLotById mutent lot.qtyRemaining directement, il
+        // faut donc annuler explicitement).
+        if (selectedLotId) {
+            const lot = (assetToModify.lots || []).find(l => String(l.id) === String(selectedLotId));
+            if (lot) lot.qtyRemaining = (lot.qtyRemaining || 0) + qtyToSell;
+        } else {
+            dryRun.consumedLots.forEach(c => {
+                const lot = (assetToModify.lots || []).find(l => String(l.id) === String(c.lotId));
+                if (lot) lot.qtyRemaining = (lot.qtyRemaining || 0) + c.qty;
+            });
+        }
+    }
+
+    // --- ÉTAPE 2 : la cession est valide → on la persiste ---
+    if (editId) {
         const idx = cessions.findIndex(c => c.id === parseFloat(editId));
         if (idx > -1) cessions[idx] = cession;
     } else {
         cessions.push(cession);
     }
 
-    // Si la cession provient du flux "Vendre un actif", consommer les lots
-    const sourceAssetId = parseFloat(document.getElementById('cession-source-asset').value);
-    if (!editId && sourceAssetId) {
-        const asset = assets.find(a => a.id === sourceAssetId);
-        if (asset) {
-            const qtyToSell = parseFloat(document.getElementById('cession-qty').value) || asset.qty;
-            const selectedLotId = document.getElementById('cession-lot-id-hidden')?.value || '';
+    // --- ÉTAPE 3 : appliquer la consommation des lots pour de vrai ---
+    if (assetToModify) {
+        const selectedLotId = document.getElementById('cession-lot-id-hidden')?.value || '';
+        const consommation = selectedLotId
+            ? consumeLotById(assetToModify, selectedLotId, qtyToSell)
+            : consumeFIFO(assetToModify, qtyToSell);
 
-            if (qtyToSell > asset.qty) {
-                alert(`Quantité invalide : ${qtyToSell} demandées, ${asset.qty} disponibles.`);
-                return;
-            }
-
-            // Consommation : nominative si un lot est sélectionné, sinon FIFO classique
-            let consommation;
-            if (selectedLotId) {
-                consommation = consumeLotById(asset, selectedLotId, qtyToSell);
-            } else {
-                consommation = consumeFIFO(asset, qtyToSell);
-            }
-
-            if (consommation.error) {
-                alert(consommation.error);
-                return;
-            }
-
-            // Recalcule invested / frais / qty sur les lots restants
-            syncAssetFromLots(asset);
-
-            // Si plus rien, on supprime l'actif
-            if (asset.qty <= 0.0001) {
-                if (confirm(`Vente totale de "${asset.name}". L'actif sera retiré du portefeuille.`)) {
-                    assets = assets.filter(a => a.id !== sourceAssetId);
-                    saveToStorage();
-                }
-            } else {
-                // Vente partielle : l'actif reste, on réduit proportionnellement sa valeur de marché
-                const totalQtyAvantVente = asset.qty + qtyToSell;
-                const ratioRestant = totalQtyAvantVente > 0 ? (asset.qty / totalQtyAvantVente) : 0;
-                asset.value = Math.round(asset.value * ratioRestant * 100) / 100;
-                upsertTodayHistoryPoint(asset, asset.value, asset.invested);
-                saveToStorage();
-            }
+        // (Impossible d'échouer ici : on l'a validé en étape 1.)
+        if (consommation.error) {
+            // Sécurité ultime : on retire la cession que l'on vient d'ajouter
+            cessions = cessions.filter(c => c.id !== cession.id);
+            alert('Erreur inattendue lors de la consommation des lots : ' + consommation.error);
+            return;
         }
+
+        syncAssetFromLots(assetToModify);
+
+        if (assetToModify.qty <= 0.0001) {
+            if (confirm(`Vente totale de "${assetToModify.name}". L'actif sera retiré du portefeuille.`)) {
+                assets = assets.filter(a => a.id !== sourceAssetId);
+            }
+        } else {
+            const totalQtyAvantVente = assetToModify.qty + qtyToSell;
+            const ratioRestant = totalQtyAvantVente > 0 ? (assetToModify.qty / totalQtyAvantVente) : 0;
+            assetToModify.value = Math.round(assetToModify.value * ratioRestant * 100) / 100;
+            upsertTodayHistoryPoint(assetToModify, assetToModify.value, assetToModify.invested);
+        }
+        saveToStorage();
     }
-    
-        saveCessions();
-        closeModal('modal-add-cession');
-        calculateAnneeN1();
-        renderCessionsTable(cessionFilter);
-        refreshAllUI();
-        e.target.reset();
-    }
+
+    saveCessions();
+    closeModal('modal-add-cession');
+    calculateAnneeN1();
+    renderCessionsTable(cessionFilter);
+    refreshAllUI();
+    e.target.reset();
+}
 
 function editCession(id) {
     const c = cessions.find(x => x.id === id);
@@ -1054,7 +1085,7 @@ function editCession(id) {
 
     const sourceSelect = document.getElementById('cession-source-asset');
     sourceSelect.innerHTML = '<option value="">-- Saisie libre --</option>' +
-        assets.map(a => `<option value="${a.id}">${a.name} (${a.ticker})</option>`).join('');
+        assets.map(a => `<option value="${a.id}">${escapeHTML(a.name)} (${escapeHTML(a.ticker)})</option>`).join('');
     sourceSelect.value = '';
 
     populateCessionEnvelopeOptions();
@@ -1095,9 +1126,14 @@ function openRecapModal() {
     const regimeLabel = taxRegimeMode === 'PFU'
         ? 'PFU / Flat Tax (30%)'
         : `Barème Progressif (TMI ${(taxTMI * 100).toFixed(0)}%)`;
-    const impotEstime    = document.getElementById('cession-stat-impot-estime').innerText;
-    const metalsTax      = document.getElementById('decomp-metaux-total').innerText;
-    const enveloppesTax  = document.getElementById('decomp-enveloppes-total').innerText;
+
+    // B14 : lecture via l'objet structuré (plus de parsing de texte DOM)
+    const tax = (typeof lastTaxBreakdown !== 'undefined' && lastTaxBreakdown)
+        ? lastTaxBreakdown
+        : (typeof computeTaxBreakdown === 'function' ? computeTaxBreakdown() : null);
+    const impotEstime   = tax ? formatEUR(tax.selectedTotal)     : '—';
+    const metalsTax     = tax ? formatEUR(tax.metalsTaxTotal)    : '—';
+    const enveloppesTax = tax ? formatEUR(tax.enveloppesTaxTotal) : '—';
 
     document.getElementById('modal-recap-body').innerHTML = `
         <div class="p-3 bg-gray-950 rounded-lg border border-gray-800">

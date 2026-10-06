@@ -109,24 +109,15 @@ function calculateOverallStats() {
         realizedPctEl.className = `text-xs mt-1 font-mono ${realizedPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
     }
 
-    // --- 3) Impôt estimé (lecture DOM, calculé par calculateAnneeN1) ---
+    // --- 3) Impôt estimé (via l'objet structuré retourné par calculateAnneeN1) ---
+    // B14 : plus de lecture DOM fragile. On utilise lastTaxBreakdown (mis à jour
+    // par calculateAnneeN1) ou, en secours, on le recalcule à la volée.
     let impotEstime = 0;
-    const impotEl = document.getElementById('cession-stat-impot-estime');
-    if (impotEl) {
-        const txt = impotEl.innerText.replace(/[^\d,.-]/g, '').replace(',', '.');
-        impotEstime = parseFloat(txt) || 0;
-    }
-
-    // Ajouter la fiscalité métaux et enveloppes pour un total honnête
-    const metauxEl = document.getElementById('decomp-metaux-total');
-    const envEl    = document.getElementById('decomp-enveloppes-total');
-    if (metauxEl) {
-        const t = metauxEl.innerText.replace(/[^\d,.-]/g, '').replace(',', '.');
-        impotEstime += parseFloat(t) || 0;
-    }
-    if (envEl) {
-        const t = envEl.innerText.replace(/[^\d,.-]/g, '').replace(',', '.');
-        impotEstime += parseFloat(t) || 0;
+    if (typeof computeTaxBreakdown === 'function') {
+        const tax = (typeof lastTaxBreakdown !== 'undefined' && lastTaxBreakdown)
+            ? lastTaxBreakdown
+            : computeTaxBreakdown();
+        impotEstime = tax.totalImpot || 0;
     }
 
     const totalTaxEl = document.getElementById('stat-total-tax');
@@ -172,7 +163,7 @@ function tagBadgesHTML(asset) {
 
 function cadranBadgesHTML(asset) {
     const sec = ((asset.cadrans && asset.cadrans.secondary) || []).map(q =>
-        `<span class="px-1.5 py-0.5 rounded border border-dashed text-[9px] whitespace-nowrap opacity-70 ${CADRAN_BADGE_COLORS[q]}" title="Cadran secondaire (informatif, hors calcul des 25%)">+ ${cadranLabel(q)}</span>`
+        `<span class="px-1.5 py-0.5 rounded border border-dashed text-[9px] whitespace-nowrap opacity-70 ${CADRAN_BADGE_COLORS[q]}" title="Cadran secondaire (informatif, hors calcul des 25%)">+ ${escapeHTML(cadranLabel(q))}</span>`
     ).join(' ');
     return cadranBadgeHTML(asset.cadran || 'HORS_GAVE') + (sec ? ' ' + sec : '');
 }
@@ -238,12 +229,12 @@ function renderInventoryTable(filterCat = inventoryFilter, searchQuery) {
         tr.onclick = () => openAssetDetailModal(asset.id);
         tr.innerHTML = `
             <td class="p-3">
-                <div class="font-bold text-white">${asset.name}</div>
+                <div class="font-bold text-white">${escapeHTML(asset.name)}</div>
                 <div class="text-[10px] text-gray-500 font-mono">${assetSubtitleHTML(asset)}</div>
             </td>
             <td class="p-3"><div class="flex flex-wrap gap-1">${tagBadgesHTML(asset)}</div></td>
             <td class="p-3"><div class="flex flex-wrap gap-1">${cadranBadgesHTML(asset)}</div></td>
-            <td class="p-3 text-right font-mono">${asset.qty}</td>
+            <td class="p-3 text-right font-mono">${fmtQty(asset.qty)}</td>
             <td class="p-3 text-right font-mono text-gray-400">${formatEUR(asset.frais || 0)}</td>
             <td class="p-3 text-right font-mono">${formatEUR(asset.invested)}</td>
             <td class="p-3 text-right font-mono font-bold text-white">${formatEUR(asset.value)}</td>
@@ -269,7 +260,7 @@ function renderInventoryTable(filterCat = inventoryFilter, searchQuery) {
         card.innerHTML = `
             <div class="flex justify-between items-start gap-2">
                 <div class="min-w-0">
-                    <div class="font-bold text-white text-sm truncate">${asset.name}</div>
+                    <div class="font-bold text-white text-sm truncate">${escapeHTML(asset.name)}</div>
                     <div class="text-[10px] text-gray-500 font-mono">${assetSubtitleHTML(asset)}</div>
                 </div>
                 <div class="text-right flex-shrink-0">
@@ -279,7 +270,7 @@ function renderInventoryTable(filterCat = inventoryFilter, searchQuery) {
             </div>
             <div class="flex flex-wrap gap-1">${tagBadgesHTML(asset)} ${cadranBadgesHTML(asset)}</div>
             <div class="flex justify-between items-center text-[11px] text-gray-400">
-                <span>Qté ${asset.qty} · Investi ${formatEUR(asset.invested)} · Frais ${formatEUR(asset.frais || 0)}</span>
+                <span>Qté ${fmtQty(asset.qty)} · Investi ${formatEUR(asset.invested)} · Frais ${formatEUR(asset.frais || 0)}</span>
             </div>
             <div class="flex justify-end gap-1 pt-1 border-t border-gray-800">
                 <button onclick="event.stopPropagation(); openAssetCompare(${asset.id})" class="p-2 text-gray-400 hover:text-indigo-400"><i class="fa-solid fa-code-compare"></i></button>
@@ -321,7 +312,7 @@ function searchInventory() {
 // ---------------------------------------------------------------------
 function renderCryptoTable() {
     const tbody = document.getElementById('table-crypto-body');
-    const cryptos = assets.filter(a => a.category === 'Crypto');
+    const cryptos = assets.filter(a => hasTag(a, 'Crypto'));
     let total = 0;
 
     tbody.innerHTML = cryptos.map(a => {
@@ -329,8 +320,8 @@ function renderCryptoTable() {
         const pnl = (a.value || 0) - (a.invested || 0);
         const isPos = pnl >= 0;
         return `<tr class="clickable-row" onclick="openAssetDetailModal(${a.id})">
-            <td class="p-3"><div class="font-bold text-white">${a.name}</div><div class="text-[10px] text-gray-500 font-mono">${a.ticker}</div></td>
-            <td class="p-3 text-right font-mono">${a.qty}</td>
+            <td class="p-3"><div class="font-bold text-white">${escapeHTML(a.name)}</div><div class="text-[10px] text-gray-500 font-mono">${escapeHTML(a.ticker)}</div></td>
+            <td class="p-3 text-right font-mono">${fmtQty(a.qty)}</td>
             <td class="p-3 text-right font-mono text-gray-400">${formatEUR(a.frais || 0)}</td>
             <td class="p-3 text-right font-mono">${formatEUR(a.invested)}</td>
             <td class="p-3 text-right font-mono font-bold text-white">${formatEUR(a.value)}</td>
@@ -377,9 +368,9 @@ function renderHorsGaveTable(filterCat = horsGaveFilter) {
         const pnl = (a.value || 0) - (a.invested || 0);
         const isPos = pnl >= 0;
         return `<tr class="clickable-row" onclick="openAssetDetailModal(${a.id})">
-            <td class="p-3"><div class="font-bold text-white">${a.name}</div><div class="text-[10px] text-gray-500 font-mono">${a.ticker}</div></td>
-            <td class="p-3"><span class="px-2 py-0.5 rounded bg-gray-800 text-gray-300 text-[10px]">${a.category}</span></td>
-            <td class="p-3 text-right font-mono">${a.qty}</td>
+            <td class="p-3"><div class="font-bold text-white">${escapeHTML(a.name)}</div><div class="text-[10px] text-gray-500 font-mono">${escapeHTML(a.ticker)}</div></td>
+            <td class="p-3"><span class="px-2 py-0.5 rounded bg-gray-800 text-gray-300 text-[10px]">${escapeHTML(a.category)}</span></td>
+            <td class="p-3 text-right font-mono">${fmtQty(a.qty)}</td>
             <td class="p-3 text-right font-mono text-gray-400">${formatEUR(a.frais || 0)}</td>
             <td class="p-3 text-right font-mono font-bold text-white">${formatEUR(a.value)}</td>
             <td class="p-3 text-right font-mono font-bold ${isPos ? 'text-emerald-400' : 'text-rose-400'}">${isPos ? '+' : ''}${formatEUR(pnl)}</td>
@@ -454,7 +445,7 @@ function renderGaveDetailTable() {
     group.innerHTML = `<button onclick="toggleGaveDetailFilter('ALL')" class="px-3 py-1.5 rounded-lg text-xs border font-medium ${allSelected ? 'bg-gray-800 text-white border-gray-700' : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-white'}">Tous</button>` +
         GAVE_QUADRANTS.map(q => {
             const active = gaveDetailFilter.has(q);
-            return `<button onclick="toggleGaveDetailFilter('${q}')" class="px-3 py-1.5 rounded-lg text-xs border font-medium ${active ? activeClasses[q] : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-white'}">${cadranLabel(q)}</button>`;
+            return `<button onclick="toggleGaveDetailFilter('${q}')" class="px-3 py-1.5 rounded-lg text-xs border font-medium ${active ? activeClasses[q] : 'bg-gray-900 text-gray-400 border-gray-800 hover:text-white'}">${escapeHTML(cadranLabel(q))}</button>`;
         }).join('');
 
     const items = assets.filter(a => GAVE_QUADRANTS.includes(a.cadran) && gaveDetailFilter.has(a.cadran));
@@ -464,9 +455,9 @@ function renderGaveDetailTable() {
         const pnl = (a.value || 0) - (a.invested || 0);
         const isPos = pnl >= 0;
         return `<tr class="clickable-row" onclick="openAssetDetailModal(${a.id})">
-            <td class="p-3"><div class="font-bold text-white">${a.name}</div><div class="text-[10px] text-gray-500 font-mono">${a.ticker}</div></td>
+            <td class="p-3"><div class="font-bold text-white">${escapeHTML(a.name)}</div><div class="text-[10px] text-gray-500 font-mono">${escapeHTML(a.ticker)}</div></td>
             <td class="p-3">${cadranBadgeHTML(a.cadran)}</td>
-            <td class="p-3 text-right font-mono">${a.qty}</td>
+            <td class="p-3 text-right font-mono">${fmtQty(a.qty)}</td>
             <td class="p-3 text-right font-mono text-gray-400">${formatEUR(a.frais || 0)}</td>
             <td class="p-3 text-right font-mono">${formatEUR(a.invested)}</td>
             <td class="p-3 text-right font-mono font-bold text-white">${formatEUR(a.value)}</td>
@@ -484,8 +475,8 @@ function renderGaveDetailTable() {
 // ---------------------------------------------------------------------
 function updatePiliersSection() {
     const gaveAssets   = assets.filter(a => GAVE_QUADRANTS.includes(a.cadran));
-    const cryptoAssets = assets.filter(a => a.category === 'Crypto');
-    const horsAssets   = assets.filter(a => a.cadran === 'HORS_GAVE' && a.category !== 'Crypto');
+    const cryptoAssets = assets.filter(a => hasTag(a, 'Crypto'));
+    const horsAssets   = assets.filter(a => a.cadran === 'HORS_GAVE' && !hasTag(a, 'Crypto'));
 
     const piliers = {
         gave:   { value: gaveAssets.reduce((s,a)=>s+(a.value||0),0),   invested: gaveAssets.reduce((s,a)=>s+(a.invested||0),0),   frais: gaveAssets.reduce((s,a)=>s+(a.frais||0),0) },
@@ -525,10 +516,10 @@ function renderArbitragesTable() {
     tbody.innerHTML = sorted.length ? sorted.map(a => `
         <tr>
             <td class="p-3 whitespace-nowrap">${a.date ? new Date(a.date).toLocaleDateString('fr-FR') : '—'}</td>
-            <td class="p-3 text-rose-300 font-bold">${a.source}</td>
-            <td class="p-3 text-emerald-300 font-bold">${a.destination}</td>
+            <td class="p-3 text-rose-300 font-bold">${escapeHTML(a.source)}</td>
+            <td class="p-3 text-emerald-300 font-bold">${escapeHTML(a.destination)}</td>
             <td class="p-3 text-right text-white font-bold">${formatEUR(a.montant)}</td>
-            <td class="p-3 text-gray-400 font-sans">${a.motif || '—'}</td>
+            <td class="p-3 text-gray-400 font-sans">${escapeHTML(a.motif) || '—'}</td>
             <td class="p-3 text-center whitespace-nowrap">
                 <button onclick="editArbitrage(${a.id})" class="p-1.5 text-gray-400 hover:text-indigo-400"><i class="fa-solid fa-pen"></i></button>
                 <button onclick="deleteArbitrage(${a.id})" class="p-1.5 text-gray-400 hover:text-rose-400"><i class="fa-solid fa-trash"></i></button>
@@ -614,7 +605,7 @@ function openReclassModal() {
     if (!list.length) return;
     document.getElementById('modal-reclass-body').innerHTML = list.map(a => `
         <div class="flex items-center justify-between gap-3 p-2.5 bg-gray-950 border border-gray-800 rounded-lg">
-            <div class="min-w-0"><div class="font-bold text-white truncate">${a.name}</div><div class="text-[10px] text-gray-500 font-mono">${a.ticker}</div></div>
+            <div class="min-w-0"><div class="font-bold text-white truncate">${escapeHTML(a.name)}</div><div class="text-[10px] text-gray-500 font-mono">${escapeHTML(a.ticker)}</div></div>
             <div class="flex gap-3 flex-shrink-0 text-gray-300">
                 <label class="flex items-center gap-1"><input type="radio" name="reclass-${a.id}" value="Action" ${a.reclassSuggestion !== 'ETF' ? 'checked' : ''} class="accent-emerald-500"> Action</label>
                 <label class="flex items-center gap-1"><input type="radio" name="reclass-${a.id}" value="ETF" ${a.reclassSuggestion === 'ETF' ? 'checked' : ''} class="accent-indigo-500"> ETF</label>
@@ -777,22 +768,24 @@ function computeAdvancedStats() {
         hhiLabelEl.innerText = label;
     }
 
-    // Position la plus ancienne
+    // Position la plus ancienne : on cherche d'abord dans les lots restants,
+    // puis dans les buys, et on retient le MIN global sur TOUS les actifs.
     let oldestAsset = null, oldestDate = null;
     assets.forEach(a => {
+        let localOldest = null;
         (a.lots || []).forEach(l => {
-            if ((l.qtyRemaining || 0) > 0) {
-                const d = parseFlexDate(l.date);
-                if (d && (!oldestDate || d < oldestDate)) {
-                    oldestDate = d;
-                    oldestAsset = a;
-                }
-            }
+            if ((l.qtyRemaining || 0) <= 0) return;
+            const d = parseFlexDate(l.date);
+            if (d && (!localOldest || d < localOldest)) localOldest = d;
         });
-        // Fallback sur buys[0] si pas de lots
-        if (!oldestDate && a.buys && a.buys[0]) {
+        // Fallback sur buys[0] uniquement si AUCUN lot exploitable pour CET actif
+        if (!localOldest && a.buys && a.buys[0]) {
             const d = parseFlexDate(a.buys[0].date);
-            if (d && (!oldestDate || d < oldestDate)) { oldestDate = d; oldestAsset = a; }
+            if (d) localOldest = d;
+        }
+        if (localOldest && (!oldestDate || localOldest < oldestDate)) {
+            oldestDate = localOldest;
+            oldestAsset = a;
         }
     });
     const oldestYearsEl = document.getElementById('inv-stat-oldest-years');
@@ -901,17 +894,14 @@ function computeAdvancedStats() {
     const fraisCessionEl = document.getElementById('fiscal-stat-frais-cession');
     if (fraisCessionEl) fraisCessionEl.innerText = formatEUR(cessions.reduce((s, c) => s + (c.frais || 0), 0));
 
-    // Taux d'imposition effectif
+    // Taux d'imposition effectif — B14 : via l'objet structuré, plus de lecture DOM
     let impotTotal = 0;
-    const impotEl2 = document.getElementById('cession-stat-impot-estime');
-    if (impotEl2) {
-        const t = impotEl2.innerText.replace(/[^\d,.-]/g, '').replace(',', '.');
-        impotTotal += parseFloat(t) || 0;
+    if (typeof computeTaxBreakdown === 'function') {
+        const tax = (typeof lastTaxBreakdown !== 'undefined' && lastTaxBreakdown)
+            ? lastTaxBreakdown
+            : computeTaxBreakdown();
+        impotTotal = tax.totalImpot || 0;
     }
-    const metauxEl2 = document.getElementById('decomp-metaux-total');
-    const envEl2 = document.getElementById('decomp-enveloppes-total');
-    if (metauxEl2) { const t = metauxEl2.innerText.replace(/[^\d,.-]/g, '').replace(',', '.'); impotTotal += parseFloat(t) || 0; }
-    if (envEl2)    { const t = envEl2.innerText.replace(/[^\d,.-]/g, '').replace(',', '.');  impotTotal += parseFloat(t) || 0; }
 
     let pnlRealise = 0, costRealise = 0;
     cessions.forEach(c => {

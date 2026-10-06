@@ -32,6 +32,18 @@ window.addEventListener('DOMContentLoaded', () => {
 
     // 9. État initial du modal Google Drive
     initDriveSyncUI();
+
+    // 9b. Debounce sur la recherche d'actifs (300 ms — évite de spammer CoinGecko)
+    const searchInput = document.getElementById('add-search-input');
+    if (searchInput) {
+        searchInput.addEventListener('input', debounce(triggerAssetSearch, 300));
+    }
+
+    // 9c. Flag « champ Valeur Actuelle touché » pour ne plus écraser une saisie manuelle
+    const addValueInput = document.getElementById('add-value');
+    if (addValueInput) {
+        addValueInput.addEventListener('input', () => { _addValueTouched = true; });
+    }
         // 10. Force l'ouverture du calendrier natif sur tous les champs date (utile sur Firefox/Linux)
     document.querySelectorAll('input[type="date"]').forEach(inp => {
         inp.addEventListener('focus', () => {

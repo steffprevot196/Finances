@@ -3,6 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self';
+                   script-src 'self' 'unsafe-inline'
+                              https://cdn.tailwindcss.com
+                              https://cdn.jsdelivr.net
+                              https://cdnjs.cloudflare.com
+                              https://accounts.google.com;
+                   connect-src 'self'
+                               https://api.coingecko.com
+                               https://api.frankfurter.dev
+                               https://finnhub.io
+                               https://www.googleapis.com
+                               https://accounts.google.com;
+                   img-src 'self' data:;
+                   style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+                   font-src https://fonts.gstatic.com;
+                   frame-ancestors 'none';
+                   base-uri 'self';">
         <title>PatriMonial - Gestion & Suivi de Patrimoine</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
     <!-- Tailwind CSS -->
@@ -456,10 +474,15 @@
                         <div>
                             <label class="block text-gray-400 mb-1">Phrase secrète de chiffrement (jamais envoyée nulle part)</label>
                             <input type="password" id="drive-passphrase-input" placeholder="Au moins 8 caractères" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white text-[11px] focus:outline-none focus:border-blue-500">
-                            <label class="flex items-center gap-2 mt-2 text-[10px] text-gray-400 cursor-pointer">
-                                <input type="checkbox" id="drive-remember-passphrase" onchange="onToggleRememberPassphrase(this.checked)" class="accent-blue-500">
-                                Mémoriser la phrase sur cet appareil <span class="text-amber-500/80">(pratique pour Android, à éviter sur PC partagé)</span>
-                            </label>
+                            <div class="mt-2 p-2.5 bg-indigo-950/40 border border-indigo-800/50 rounded-lg text-[10px] text-indigo-200 leading-relaxed">
+                                <i class="fa-solid fa-shield-halved mr-1"></i>
+                                <b>Sécurité :</b> votre phrase n'est jamais écrite en clair. À la première saisie sur cet appareil,
+                                une clé de chiffrement non-exportable est dérivée (AES-256 / PBKDF2 250 000 itérations) et mémorisée
+                                localement. Vous n'aurez plus à la retaper ici.
+                                <button onclick="forgetMasterKey()" type="button" class="mt-1.5 w-full text-[10px] text-rose-300 hover:text-rose-200 underline">
+                                    Oublier la phrase sur cet appareil
+                                </button>
+                            </div>
                         </div>
                         <div class="flex gap-2">
                             <button onclick="connectDrive()" class="flex-1 px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium">Se connecter à Drive</button>
@@ -1233,6 +1256,7 @@
                     </p>
                     <div id="cession-lot-picker" class="space-y-1.5 max-h-48 overflow-y-auto"></div>
                 </div>
+                <input type="hidden" id="cession-lot-id-hidden" value="">
                 <form onsubmit="handleAddCession(event)" class="space-y-4">
                     <input type="hidden" id="cession-edit-id">
                     <div class="grid grid-cols-2 gap-3">
@@ -1451,7 +1475,7 @@
                         <span class="text-[10px] text-gray-400 font-normal">Saisir Nom ou Ticker</span>
                     </label>
                     <div class="flex gap-2">
-                        <input type="text" id="add-search-input" onkeyup="triggerAssetSearch()" placeholder="ex: Vera Valor, Yen, JPY, Napoléon 10, SpaceX, CW8..." class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500 font-sans">
+                        <input type="text" id="add-search-input" placeholder="ex: Vera Valor, Yen, JPY, Napoléon 10, SpaceX, CW8..." class="w-full bg-gray-900 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500 font-sans">
                         <button type="button" onclick="triggerAssetSearch()" class="px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium transition flex items-center gap-1">
                             <i class="fa-solid fa-magnifying-glass"></i>
                         </button>
