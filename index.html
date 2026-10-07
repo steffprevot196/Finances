@@ -9,13 +9,16 @@
                               https://cdn.tailwindcss.com
                               https://cdn.jsdelivr.net
                               https://cdnjs.cloudflare.com
-                              https://accounts.google.com;
+                              https://accounts.google.com
+                              https://*.gstatic.com;
                    connect-src 'self'
                                https://api.coingecko.com
                                https://api.frankfurter.dev
                                https://finnhub.io
+                               https://xaus.com
                                https://www.googleapis.com
-                               https://accounts.google.com;
+                               https://accounts.google.com
+                               https://oauth2.googleapis.com;
                    img-src 'self' data:;
                    style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
                    font-src https://fonts.gstatic.com;
@@ -108,7 +111,7 @@
         <!-- METRICS / KPI BANNER — Positions actuelles -->
     <div class="mb-3">
         <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">📊 Positions actuelles</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
                 <div class="text-xs font-medium text-gray-400 mb-1">Capital Investi</div>
                 <div class="text-2xl font-bold text-white font-mono" id="stat-total-invested">0,00 €</div>
@@ -133,6 +136,14 @@
                 <div class="text-2xl font-bold font-mono" id="stat-pnl">0,00 €</div>
                 <div class="text-xs font-semibold mt-1 font-mono" id="stat-pnl-pct">+0.00%</div>
                 <div class="absolute right-3 bottom-2 text-amber-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-arrow-trend-up"></i></div>
+            </div>
+
+            <div class="bg-gray-900/80 border border-teal-900/40 rounded-xl p-4 relative overflow-hidden">
+                <div class="text-xs font-medium text-gray-400 mb-1">Gain / Perte hors frais</div>
+                <div class="text-2xl font-bold font-mono" id="stat-pnl-hf">0,00 €</div>
+                <div class="text-xs font-semibold mt-1 font-mono" id="stat-pnl-hf-pct">+0.00%</div>
+                <div class="text-[10px] text-gray-500 mt-0.5" id="stat-pnl-hf-detail">frais neutralisés : 0,00 €</div>
+                <div class="absolute right-3 bottom-2 text-teal-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-filter-circle-dollar"></i></div>
             </div>
 
             <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
@@ -452,7 +463,7 @@
         <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
             <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
                 <h3 class="font-bold text-white text-sm"><i class="fa-solid fa-cloud-arrow-up text-blue-400"></i> Synchronisation & Sauvegardes</h3>
-                <button onclick="closeModal('modal-drive-sync')" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+                <button onclick="closeModal('modal-drive-sync')" class="w-8 h-8 rounded-lg bg-gray-800 text-gray-300 hover:bg-rose-900 hover:text-white transition flex items-center justify-center flex-shrink-0"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="p-4 space-y-4 overflow-y-auto text-xs text-gray-300">
 
@@ -654,7 +665,7 @@
             </div>
 
             <!-- STATS CRYPTO -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 <div class="bg-gray-900/60 border border-purple-900/40 rounded-xl p-3">
                     <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Nombre de cryptos</div>
                     <div class="text-lg font-bold font-mono text-purple-400" id="crypto-stat-count">0</div>
@@ -666,6 +677,11 @@
                 <div class="bg-gray-900/60 border border-purple-900/40 rounded-xl p-3">
                     <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Gain / Perte potentiel</div>
                     <div class="text-lg font-bold font-mono text-emerald-400" id="crypto-stat-pnl">+0,00 €</div>
+                </div>
+                <div class="bg-gray-900/60 border border-teal-900/40 rounded-xl p-3">
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Gain / Perte hors frais</div>
+                    <div class="text-lg font-bold font-mono text-emerald-400" id="crypto-stat-pnl-hf">+0,00 €</div>
+                    <div class="text-[10px] text-gray-500" id="crypto-stat-pnl-hf-detail">frais : 0,00 €</div>
                 </div>
                 <div class="bg-gray-900/60 border border-purple-900/40 rounded-xl p-3">
                     <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Plus grosse ligne</div>
@@ -699,7 +715,7 @@
             </div>
 
             <!-- STATS HORS-CADRAN -->
-            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
                 <div class="bg-gray-900/60 border border-blue-900/40 rounded-xl p-3">
                     <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Nombre de lignes</div>
                     <div class="text-lg font-bold font-mono text-blue-400" id="hors-stat-count">0</div>
@@ -712,7 +728,15 @@
                     <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Gain / Perte potentiel</div>
                     <div class="text-lg font-bold font-mono text-emerald-400" id="hors-stat-pnl">+0,00 €</div>
                 </div>
+
+                    <div class="bg-gray-900/60 border border-teal-900/40 rounded-xl p-3">
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Gain / Perte hors frais</div>
+                    <div class="text-lg font-bold font-mono text-emerald-400" id="hors-stat-pnl-hf">+0,00 €</div>
+                    <div class="text-[10px] text-gray-500" id="hors-stat-pnl-hf-detail">frais : 0,00 €</div>
+                </div>
+
                 <div class="bg-gray-900/60 border border-blue-900/40 rounded-xl p-3">
+                                    
                     <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Liquidités / Cash</div>
                     <div class="text-lg font-bold font-mono text-amber-400" id="hors-stat-cash">0,00 €</div>
                     <div class="text-[10px] text-gray-500">Devises + Livrets</div>
@@ -1390,6 +1414,29 @@
                 <div class="h-64 w-full bg-gray-950 border border-gray-800 rounded-xl p-3">
                     <canvas id="assetHistoryChart"></canvas>
                 </div>
+
+                <!-- DÉTAIL DES LOTS (achats successifs) -->
+                <div>
+                    <div class="text-xs font-bold text-gray-300 uppercase mb-2 flex items-center gap-2">
+                        <i class="fa-solid fa-layer-group text-blue-400"></i>
+                        Détail des achats successifs (lots)
+                    </div>
+                    <div class="overflow-x-auto rounded-xl border border-gray-800">
+                        <table class="w-full text-left text-xs text-gray-300">
+                            <thead class="bg-gray-950 text-gray-400 uppercase font-medium">
+                                <tr>
+                                    <th class="p-2.5">Date</th>
+                                    <th class="p-2.5">Référence</th>
+                                    <th class="p-2.5 text-right">Qté achetée</th>
+                                    <th class="p-2.5 text-right">Qté restante</th>
+                                    <th class="p-2.5 text-right">Prix unitaire</th>
+                                    <th class="p-2.5 text-right">Frais</th>
+                                </tr>
+                            </thead>
+                            <tbody id="modal-asset-lots-body" class="divide-y divide-gray-800/60 font-mono"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -1551,7 +1598,27 @@
                         </div>
                         <div>
                             <label class="block text-gray-400 mb-1">Courtier / Plateforme</label>
-<input type="text" id="add-broker" placeholder="ex: Boursorama, Binance, AuCoffre.com" autocomplete="off" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500">
+                            <select id="add-broker-select" onchange="onBrokerSelectChange()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500">
+                                <option value="">— Aucun —</option>
+                                <option value="Boursorama">Boursorama</option>
+                                <option value="Bourse Direct">Bourse Direct</option>
+                                <option value="Fortuneo">Fortuneo</option>
+                                <option value="Trade Republic">Trade Republic</option>
+                                <option value="Interactive Brokers">Interactive Brokers</option>
+                                <option value="Degiro">Degiro</option>
+                                <option value="Saxo Banque">Saxo Banque</option>
+                                <option value="Binance">Binance</option>
+                                <option value="Coinbase">Coinbase</option>
+                                <option value="Kraken">Kraken</option>
+                                <option value="Ledger">Ledger</option>
+                                <option value="AuCoffre.com">AuCoffre.com</option>
+                                <option value="Linxea">Linxea</option>
+                                <option value="Yomoni">Yomoni</option>
+                                <option value="Nalo">Nalo</option>
+                                <option value="__custom__">➕ Autre (saisir manuellement)</option>
+                            </select>
+                            <input type="text" id="add-broker-custom" placeholder="Nom du courtier / plateforme" autocomplete="off" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500 mt-1.5 hidden">
+                            <input type="hidden" id="add-broker" value="">
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-3">

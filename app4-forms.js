@@ -3,6 +3,10 @@
 // Dépend de : app1-core.js, app2-ui.js
 // =====================================================================
 
+// Flag « champ Valeur Actuelle touché » — déclaré tôt pour éviter toute
+// ambiguïté sur sa portée (utilisé dans openAddAssetModal/openEditAssetModal).
+let _addValueTouched = false;
+
 // ---------------------------------------------------------------------
 // Chips de tags (catégories multi-sélection)
 // ---------------------------------------------------------------------
@@ -132,7 +136,8 @@ function openAddAssetModal() {
     document.getElementById('add-value').value = '';
     _addValueTouched = false;
     document.getElementById('add-purchase-date').value = new Date().toISOString().slice(0, 10);
-    document.getElementById('add-broker').value = '';
+    document.getElementById('add-qty').value = 1;
+    setBrokerValue('');
     document.getElementById('add-bond-coupon').value = '';
     document.getElementById('add-bond-maturity').value = '';
     document.getElementById('add-bond-rating').value = '';
@@ -172,7 +177,7 @@ function openEditAssetModal(id) {
         ? ((asset.invested - (asset.frais || 0)) / asset.qty).toFixed(4)
         : asset.invested;
     document.getElementById('add-purchase-date').value = asset.purchaseDate || '';
-    document.getElementById('add-broker').value = asset.broker || '';
+    setBrokerValue(asset.broker || '');
 
     document.getElementById('add-valuation-mode').value = asset.valuationMode || 'MANUAL';
     document.getElementById('add-bond-coupon').value = asset.coupon !== undefined ? (asset.coupon * 100).toFixed(3) : '';
@@ -197,8 +202,6 @@ function openEditAssetModal(id) {
 // Le flag _addValueTouched empêche d'écraser une valeur saisie
 // intentionnellement par l'utilisateur (y compris 0).
 // ---------------------------------------------------------------------
-let _addValueTouched = false;
-
 function recalculateAddTotals() {
     if (_addValueTouched) return;
     const price = parseFloat(document.getElementById('add-price').value) || 0;
@@ -290,7 +293,7 @@ function handleAddAsset(e) {
         purchaseDate, broker
     };
 
-    if (editId) {
+        if (editId) {
         const asset = assets.find(a => a.id === parseFloat(editId));
         if (asset) {
             Object.assign(asset, fields);
@@ -299,41 +302,21 @@ function handleAddAsset(e) {
             if (bond) Object.assign(asset, bond);
             else { delete asset.coupon; delete asset.maturity; delete asset.rating; delete asset.nominal; }
             normalizeAsset(asset);
-
-            // B15 : resynchronise `buys` avec l'état réel des lots restants
-            const totalQtyRestant = (asset.lots || []).reduce((s, l) => s + (l.qtyRemaining || 0), 0);
-            const costRestant = (asset.lots || []).reduce((s, l) => s + (l.qtyRemaining || 0) * (l.price || 0), 0);
-            asset.buys = [{
-                date: purchaseDateFR,
-                type: 'Achat Initial (édité)',
-                qty: totalQtyRestant,
-                price: totalQtyRestant > 0 ? costRestant / totalQtyRestant : 0,
-                frais: asset.frais || 0,
-                total: asset.invested
-            }];
-
             upsertTodayHistoryPoint(asset, value, invested);
         }
     } else {
-        // Création des lots : si la référence contient plusieurs valeurs séparées par virgule,
-        // on crée un lot distinct par référence (chaque pièce physique = 1 lot nominatif).
+        // Création des lots pour ce nouvel achat
         const references = referenceRaw
             ? referenceRaw.split(',').map(s => s.trim()).filter(Boolean)
             : [];
 
         let lots;
         if (references.length > 0) {
-            // Cas nominatif : autant de lots que de références, chacun de qty 1
-            const qtyParRef = 1;
-            const fraisParRef = references.length > 0 ? frais / references.length : 0;
+            const fraisParRef = frais / references.length;
             lots = references.map(ref => makeLot(
                 purchaseDate || new Date().toISOString().slice(0, 10),
-                qtyParRef,
-                price,
-                fraisParRef,
-                ref
+                1, price, fraisParRef, ref
             ));
-            // Avertissement si quantité <> nombre de références
             if (references.length !== qty) {
                 if (!confirm(`Vous avez saisi ${references.length} référence(s) mais ${qty} unité(s).\n` +
                     `Chaque référence correspondra à 1 unité. Voulez-vous continuer ?`)) {
@@ -341,16 +324,55 @@ function handleAddAsset(e) {
                 }
             }
         } else {
-            // Cas standard : un seul lot global pour toute la quantité
             lots = [makeLot(
                 purchaseDate || new Date().toISOString().slice(0, 10),
-                qty,
-                price,
-                frais,
-                ''
+                qty, price, frais, ''
             )];
         }
 
+        // ⭐ NOUVEAU : détection d'un actif existant avec le même ISIN ou ticker
+        const existing = assets.find(a => {
+            // On ne fusionne que si même enveloppe fiscale aussi
+            if ((a.envelope || '') !== (envelope || '')) return false;
+            if (isin && a.isin && a.isin.toUpperCase() === isin.toUpperCase()) return true;
+            if (!isin && a.ticker && a.ticker.toUpperCase() === ticker.toUpperCase()) return true;
+            return false;
+        });
+
+        if (existing) {
+            const msg = `Un actif "${existing.name}" (${existing.ticker}) existe déjà dans la même enveloppe.\n\n` +
+                `• OK = AJOUTER cet achat comme un nouveau lot à l'actif existant (recommandé → 1 seule ligne)\n` +
+                `• Annuler = CRÉER un actif séparé (2 lignes distinctes)`;
+
+            if (confirm(msg)) {
+                // Capturer la valeur unitaire marché AVANT modification
+                const oldUnitValue = existing.qty > 0 ? (existing.value / existing.qty) : price;
+
+                // Ajouter les nouveaux lots et le buy à l'actif existant
+                existing.lots = (existing.lots || []).concat(lots);
+                existing.buys = (existing.buys || []).concat([{
+                    date: purchaseDateFR, type: 'Achat Additionnel',
+                    qty, price, frais, total: invested,
+                    reference: references.join(', ') || ''
+                }]);
+
+                // Recalculer qty / invested / frais depuis les lots
+                syncAssetFromLots(existing);
+
+                // Recalculer la valeur de marché : qty × valeur unitaire précédente
+                existing.value = Math.round(existing.qty * oldUnitValue * 100) / 100;
+
+                upsertTodayHistoryPoint(existing, existing.value, existing.invested);
+                saveToStorage();
+                closeModal('modal-add-asset');
+                refreshAllUI();
+                e.target.reset();
+                document.getElementById('add-edit-id').value = '';
+                return;
+            }
+        }
+
+        // Création d'un actif séparé (nouveau ticker ou refus de fusion)
         const newAsset = Object.assign({
             id: Date.now(),
             buys: [{ date: purchaseDateFR, type: 'Achat Initial', qty, price, frais, total: invested, reference: references.join(', ') || '' }],
@@ -359,9 +381,14 @@ function handleAddAsset(e) {
         }, fields, bond || {});
         normalizeAsset(newAsset);
         syncAssetFromLots(newAsset);
-        upsertTodayHistoryPoint(newAsset, value, invested);
+        // La qty réelle peut différer de la qty saisie si le nombre de références
+        // ne correspond pas (cf. confirm() ci-dessus). On réaligne `value` en conséquence.
+        newAsset.value = newAsset.qty * unitValue;
+        upsertTodayHistoryPoint(newAsset, newAsset.value, newAsset.invested);
         assets.push(newAsset);
     }
+
+
     const warnings = validateAssetCoherence(fields);
     if (warnings.length && !confirm('Avertissements :\n\n' + warnings.join('\n') + '\n\nContinuer quand même ?')) {
         return;
@@ -495,7 +522,13 @@ async function triggerAssetSearch() {
     if (typeof finnhubApiKey !== 'undefined' && finnhubApiKey && query.length >= 2) {
         searchFinnhubSymbol(query).then(finnhubResults => {
             if (finnhubResults.length) {
-                const combined = [...results, ...finnhubResults];
+                // Si la requête ressemble à un ISIN, on le propage aux résultats
+                // (l'API Finnhub ne renvoie pas l'ISIN dans sa réponse)
+                const isIsinQuery = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/i.test(query);
+                const enriched = isIsinQuery
+                    ? finnhubResults.map(r => ({ ...r, isin: query.toUpperCase() }))
+                    : finnhubResults;
+                const combined = [...results, ...enriched];
                 renderSearchResults(combined);
             }
         });
@@ -1069,9 +1102,7 @@ function handleAddCession(e) {
 
     saveCessions();
     closeModal('modal-add-cession');
-    calculateAnneeN1();
-    renderCessionsTable(cessionFilter);
-    refreshAllUI();
+    refreshAllUI();   // inclut déjà calculateAnneeN1 + renderCessionsTable
     e.target.reset();
 }
 
@@ -1159,7 +1190,54 @@ function openRecapModal() {
     `;
     document.getElementById('modal-recap').classList.remove('hidden');
 }
+// Gestion du sélecteur de courtier (avec création custom)
+const KNOWN_BROKERS = [
+    'Boursorama', 'Bourse Direct', 'Fortuneo', 'Trade Republic', 'Interactive Brokers',
+    'Degiro', 'Saxo Banque', 'Binance', 'Coinbase', 'Kraken', 'Ledger', 'AuCoffre.com',
+    'Linxea', 'Yomoni', 'Nalo'
+];
 
+function onBrokerSelectChange() {
+    const sel = document.getElementById('add-broker-select');
+    const custom = document.getElementById('add-broker-custom');
+    const hidden = document.getElementById('add-broker');
+    if (sel.value === '__custom__') {
+        custom.classList.remove('hidden');
+        custom.focus();
+        custom.oninput = () => { hidden.value = custom.value.trim(); };
+        hidden.value = custom.value.trim();
+    } else {
+        custom.classList.add('hidden');
+        custom.value = '';
+        hidden.value = sel.value;
+    }
+}
+
+// Pré-remplit le sélecteur de courtier à partir d'une valeur enregistrée
+function setBrokerValue(brokerName) {
+    const sel = document.getElementById('add-broker-select');
+    const custom = document.getElementById('add-broker-custom');
+    const hidden = document.getElementById('add-broker');
+    const v = (brokerName || '').trim();
+    if (!v) {
+        sel.value = '';
+        custom.classList.add('hidden');
+        custom.value = '';
+        hidden.value = '';
+        return;
+    }
+    if (KNOWN_BROKERS.includes(v) || v === '') {
+        sel.value = v;
+        custom.classList.add('hidden');
+        custom.value = '';
+    } else {
+        sel.value = '__custom__';
+        custom.classList.remove('hidden');
+        custom.value = v;
+        custom.oninput = () => { hidden.value = custom.value.trim(); };
+    }
+    hidden.value = v;
+}
 // =====================================================================
 // SIMULATEUR FISCALITÉ MÉTAUX (indépendant du registre)
 // =====================================================================

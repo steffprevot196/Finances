@@ -66,6 +66,26 @@ function calculateOverallStats() {
     latentPctEl.innerText = (latentPct >= 0 ? '+' : '') + latentPct.toFixed(2) + '%';
     latentPctEl.className = `text-xs font-semibold mt-1 font-mono ${latentPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
 
+    // --- Gain / Perte hors frais : on ajoute les frais au P&L (les frais sont un coût d'entrée,
+    //     pas une contre-performance du marché). Permet de juger la performance de la sélection
+    //     d'actifs, indépendamment du coût des transactions. ---
+    const investedNetDeFrais = totalInvested - totalFrais;
+    const pnlHorsFrais = latentPnl + totalFrais;
+    const pnlHorsFraisPct = investedNetDeFrais > 0 ? (pnlHorsFrais / investedNetDeFrais * 100) : 0;
+
+    const pnlHfEl = document.getElementById('stat-pnl-hf');
+    if (pnlHfEl) {
+        pnlHfEl.innerText = (pnlHorsFrais >= 0 ? '+' : '') + formatEUR(pnlHorsFrais);
+        pnlHfEl.className = `text-2xl font-bold font-mono ${pnlHorsFrais >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+    }
+    const pnlHfPctEl = document.getElementById('stat-pnl-hf-pct');
+    if (pnlHfPctEl) {
+        pnlHfPctEl.innerText = (pnlHorsFraisPct >= 0 ? '+' : '') + pnlHorsFraisPct.toFixed(2) + '%';
+        pnlHfPctEl.className = `text-xs font-semibold mt-1 font-mono ${pnlHorsFrais >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+    }
+    const pnlHfDetailEl = document.getElementById('stat-pnl-hf-detail');
+    if (pnlHfDetailEl) pnlHfDetailEl.innerText = `frais neutralisés : ${formatEUR(totalFrais)}`;
+
     document.getElementById('stat-asset-count').innerText = assets.length + (assets.length > 1 ? ' Actifs' : ' Actif');
 
     const gaveCount   = assets.filter(a => GAVE_QUADRANTS.includes(a.cadran)).length;
@@ -808,10 +828,21 @@ function computeAdvancedStats() {
     if (cryptoInvEl) cryptoInvEl.innerText = formatEUR(cryptoInvested);
 
     const cryptoPnlEl = document.getElementById('crypto-stat-pnl');
+    const cryptoFrais = cryptos.reduce((s, a) => s + (a.frais || 0), 0);
     if (cryptoPnlEl) {
         const pnl = cryptoVal - cryptoInvested;
         cryptoPnlEl.innerText = (pnl >= 0 ? '+' : '') + formatEUR(pnl);
         cryptoPnlEl.className = `text-lg font-bold font-mono ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+    }
+
+    // KPI hors frais Crypto
+    const cryptoPnlHfEl = document.getElementById('crypto-stat-pnl-hf');
+    if (cryptoPnlHfEl) {
+        const pnlHf = (cryptoVal - cryptoInvested) + cryptoFrais;
+        cryptoPnlHfEl.innerText = (pnlHf >= 0 ? '+' : '') + formatEUR(pnlHf);
+        cryptoPnlHfEl.className = `text-lg font-bold font-mono ${pnlHf >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+        const dEl = document.getElementById('crypto-stat-pnl-hf-detail');
+        if (dEl) dEl.innerText = `frais : ${formatEUR(cryptoFrais)}`;
     }
 
     let topCrypto = null, topCryptoVal = 0;
@@ -833,10 +864,21 @@ function computeAdvancedStats() {
     if (horsInvEl) horsInvEl.innerText = formatEUR(horsInvested);
 
     const horsPnlEl = document.getElementById('hors-stat-pnl');
+    const horsFrais = hors.reduce((s, a) => s + (a.frais || 0), 0);
     if (horsPnlEl) {
         const pnl = horsVal - horsInvested;
         horsPnlEl.innerText = (pnl >= 0 ? '+' : '') + formatEUR(pnl);
         horsPnlEl.className = `text-lg font-bold font-mono ${pnl >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+    }
+
+    // KPI hors frais Hors-Cadran
+    const horsPnlHfEl = document.getElementById('hors-stat-pnl-hf');
+    if (horsPnlHfEl) {
+        const pnlHf = (horsVal - horsInvested) + horsFrais;
+        horsPnlHfEl.innerText = (pnlHf >= 0 ? '+' : '') + formatEUR(pnlHf);
+        horsPnlHfEl.className = `text-lg font-bold font-mono ${pnlHf >= 0 ? 'text-emerald-400' : 'text-rose-400'}`;
+        const dEl = document.getElementById('hors-stat-pnl-hf-detail');
+        if (dEl) dEl.innerText = `frais : ${formatEUR(horsFrais)}`;
     }
 
     const cash = hors.filter(a => hasTag(a, 'Devises/Liquidités')).reduce((s, a) => s + (a.value || 0), 0);

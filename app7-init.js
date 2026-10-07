@@ -10,7 +10,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // 2. Restauration des préférences fiscales
     document.getElementById('tax-regime-pfu').checked    = taxRegimeMode === 'PFU';
     document.getElementById('tax-regime-bareme').checked = taxRegimeMode === 'BAREME';
-    document.getElementById('tax-tmi-select').value      = String(taxTMI);
+    document.getElementById('tax-tmi-select').value      = taxTMI.toFixed(2);
 
     // 3. Initialisation des chips de tags du formulaire d'ajout
     renderAssetTagChips();
@@ -45,16 +45,17 @@ window.addEventListener('DOMContentLoaded', () => {
         addValueInput.addEventListener('input', () => { _addValueTouched = true; });
     }
         // 10. Force l'ouverture du calendrier natif sur tous les champs date (utile sur Firefox/Linux)
-    document.querySelectorAll('input[type="date"]').forEach(inp => {
-        inp.addEventListener('focus', () => {
-            if (typeof inp.showPicker === 'function') {
-                try { inp.showPicker(); } catch (e) { /* silencieux */ }
-            }
+        document.querySelectorAll('input[type="date"]').forEach(inp => {
+            inp.style.colorScheme = 'dark';
+            inp.addEventListener('focus', () => {
+                try { if (typeof inp.showPicker === 'function') inp.showPicker(); } catch (_) { /* fallback silencieux */ }
+            });
         });
-        inp.addEventListener('click', () => {
-            if (typeof inp.showPicker === 'function') {
-                try { inp.showPicker(); } catch (e) { /* silencieux */ }
-            }
-        });
+
+    // 11. Fermeture des modaux avec la touche Échap
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+            document.querySelectorAll('.fixed.inset-0:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        }
     });
 });

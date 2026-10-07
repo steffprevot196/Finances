@@ -212,7 +212,33 @@ function openAssetDetailModal(id) {
     document.getElementById('modal-asset-cadran-select-wrap').innerHTML = cadranSelectHTML(asset.id, asset.cadran || 'HORS_GAVE');
 
     renderAssetDetailChart(id);
+    renderAssetLotsTable(asset);
     document.getElementById('modal-asset-detail').classList.remove('hidden');
+}
+
+// Affiche le tableau des lots dans le modal de détail de l'actif
+function renderAssetLotsTable(asset) {
+    const tbody = document.getElementById('modal-asset-lots-body');
+    if (!tbody) return;
+    const lots = (asset.lots || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+
+    if (!lots.length) {
+        tbody.innerHTML = '<tr><td colspan="6" class="p-3 text-center text-gray-500 text-xs">Aucun lot enregistré.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = lots.map(l => {
+        const remaining = l.qtyRemaining || 0;
+        const isSold = remaining <= 0;
+        return `<tr class="${isSold ? 'opacity-40' : ''}">
+            <td class="p-2.5 whitespace-nowrap">${l.date ? new Date(l.date).toLocaleDateString('fr-FR') : '—'}</td>
+            <td class="p-2.5 text-gray-400 truncate max-w-[140px]" title="${escapeHTML(l.reference || '')}">${escapeHTML(l.reference) || '—'}</td>
+            <td class="p-2.5 text-right">${l.qty}</td>
+            <td class="p-2.5 text-right ${remaining > 0 ? 'text-emerald-400 font-bold' : 'text-gray-500'}">${remaining}</td>
+            <td class="p-2.5 text-right">${formatEUR(l.price)}</td>
+            <td class="p-2.5 text-right text-gray-400">${formatEUR(l.frais || 0)}</td>
+        </tr>`;
+    }).join('');
 }
 
 function renderAssetDetailChart(id) {

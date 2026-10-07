@@ -347,8 +347,12 @@ a.cadran = a.cadrans.primary;
             )];
         }
     } else {
-        // Nettoyage : s'assurer que chaque lot a un champ `reference`
-        a.lots.forEach(l => { if (l.reference === undefined) l.reference = ''; });
+        // Nettoyage : s'assurer que chaque lot a `reference`, `qty` et `qtyRemaining`
+        a.lots.forEach(l => {
+            if (l.reference === undefined) l.reference = '';
+            if (l.qty === undefined)       l.qty = l.qtyRemaining || 0;
+            if (l.qtyRemaining === undefined) l.qtyRemaining = l.qty || 0;
+        });
     }
     return a;
 }
