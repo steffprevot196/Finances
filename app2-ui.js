@@ -243,10 +243,15 @@ function renderInventoryTable(filterCat = inventoryFilter, searchQuery) {
         const pnlPct = asset.invested > 0 ? (pnl / asset.invested * 100) : 0;
         const pnlCls = isPos ? 'text-emerald-400' : 'text-rose-400';
 
-        // ---- Ligne tableau (desktop) ----
+                // ---- Ligne tableau (desktop) ----
         const tr = document.createElement('tr');
         tr.className = 'clickable-row';
         tr.onclick = () => openAssetDetailModal(asset.id);
+
+        // Prix unitaires : PRU moyen (fiscal FR) et valeur de marché actuelle
+        const pruUnitaire   = computePRUFromLots(asset);
+        const valeurUnitaire = asset.qty > 0 ? (asset.value / asset.qty) : 0;
+
         tr.innerHTML = `
             <td class="p-3">
                 <div class="font-bold text-white">${escapeHTML(asset.name)}</div>
@@ -255,6 +260,8 @@ function renderInventoryTable(filterCat = inventoryFilter, searchQuery) {
             <td class="p-3"><div class="flex flex-wrap gap-1">${tagBadgesHTML(asset)}</div></td>
             <td class="p-3"><div class="flex flex-wrap gap-1">${cadranBadgesHTML(asset)}</div></td>
             <td class="p-3 text-right font-mono">${fmtQty(asset.qty)}</td>
+            <td class="p-3 text-right font-mono text-gray-400">${asset.qty > 0 ? formatUnitPrice(pruUnitaire) : '—'}</td>
+            <td class="p-3 text-right font-mono text-gray-300">${asset.qty > 0 ? formatUnitPrice(valeurUnitaire) : '—'}</td>
             <td class="p-3 text-right font-mono text-gray-400">${formatEUR(asset.frais || 0)}</td>
             <td class="p-3 text-right font-mono">${formatEUR(asset.invested)}</td>
             <td class="p-3 text-right font-mono font-bold text-white">${formatEUR(asset.value)}</td>
@@ -264,11 +271,13 @@ function renderInventoryTable(filterCat = inventoryFilter, searchQuery) {
             </td>
             <td class="p-3 text-right font-mono">${riskCellHTML(asset)}</td>
             <td class="p-3 text-center whitespace-nowrap">
-                <button title="Comparer" onclick="event.stopPropagation(); openAssetCompare(${asset.id})" class="p-1.5 text-gray-400 hover:text-indigo-400"><i class="fa-solid fa-code-compare"></i></button>
-                <button onclick="event.stopPropagation(); openAssetDetailModal(${asset.id})" class="p-1.5 text-gray-400 hover:text-blue-400"><i class="fa-solid fa-eye"></i></button>
-                ${hasTag(asset, 'Or & Métaux') ? `<button onclick="event.stopPropagation(); openManualGoldUpdate(${asset.id})" class="p-1.5 text-gray-400 hover:text-amber-400" title="Mettre à jour manuellement la valeur AuCoffre"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
-                <button onclick="event.stopPropagation(); openEditAssetModal(${asset.id})" class="p-1.5 text-gray-400 hover:text-emerald-400"><i class="fa-solid fa-pen"></i></button>
-                <button onclick="event.stopPropagation(); deleteAsset(${asset.id})" class="p-1.5 text-gray-400 hover:text-rose-400"><i class="fa-solid fa-trash"></i></button>
+                <div class="inline-flex items-center gap-1">
+                    <button type="button" aria-label="Comparer cet actif" title="Comparer" onclick="event.stopPropagation(); openAssetCompare(${asset.id})" class="inline-flex items-center justify-center w-8 h-8 rounded-md bg-gray-800/60 text-gray-300 hover:bg-indigo-900/60 hover:text-indigo-300 transition"><i class="fa-solid fa-code-compare"></i></button>
+                    <button type="button" aria-label="Voir le détail" title="Voir le détail" onclick="event.stopPropagation(); openAssetDetailModal(${asset.id})" class="inline-flex items-center justify-center w-8 h-8 rounded-md bg-gray-800/60 text-gray-300 hover:bg-blue-900/60 hover:text-blue-300 transition"><i class="fa-solid fa-eye"></i></button>
+                    ${hasTag(asset, 'Or & Métaux') ? `<button type="button" aria-label="Mettre à jour manuellement la valeur" title="Mettre à jour manuellement la valeur AuCoffre" onclick="event.stopPropagation(); openManualGoldUpdate(${asset.id})" class="inline-flex items-center justify-center w-8 h-8 rounded-md bg-gray-800/60 text-gray-300 hover:bg-amber-900/60 hover:text-amber-300 transition"><i class="fa-solid fa-pen-to-square"></i></button>` : ''}
+                    <button type="button" aria-label="Modifier cet actif" title="Modifier" onclick="event.stopPropagation(); openEditAssetModal(${asset.id})" class="inline-flex items-center justify-center w-8 h-8 rounded-md bg-gray-800/60 text-gray-300 hover:bg-emerald-900/60 hover:text-emerald-300 transition"><i class="fa-solid fa-pen"></i></button>
+                    <button type="button" aria-label="Supprimer cet actif" title="Supprimer" onclick="event.stopPropagation(); deleteAsset(${asset.id})" class="inline-flex items-center justify-center w-8 h-8 rounded-md bg-gray-800/60 text-gray-300 hover:bg-rose-900/60 hover:text-rose-300 transition"><i class="fa-solid fa-trash"></i></button>
+                </div>
             </td>
         `;
         tbody.appendChild(tr);
@@ -289,8 +298,9 @@ function renderInventoryTable(filterCat = inventoryFilter, searchQuery) {
                 </div>
             </div>
             <div class="flex flex-wrap gap-1">${tagBadgesHTML(asset)} ${cadranBadgesHTML(asset)}</div>
-            <div class="flex justify-between items-center text-[11px] text-gray-400">
+            <div class="flex flex-col gap-0.5 text-[11px] text-gray-400">
                 <span>Qté ${fmtQty(asset.qty)} · Investi ${formatEUR(asset.invested)} · Frais ${formatEUR(asset.frais || 0)}</span>
+                ${asset.qty > 0 ? `<span class="text-gray-500">PRU : <span class="font-mono text-gray-300">${formatUnitPrice(computePRUFromLots(asset))}</span> · Val. unitaire : <span class="font-mono text-gray-300">${formatUnitPrice(asset.value / asset.qty)}</span></span>` : ''}
             </div>
             <div class="flex justify-end gap-1 pt-1 border-t border-gray-800">
                 <button onclick="event.stopPropagation(); openAssetCompare(${asset.id})" class="p-2 text-gray-400 hover:text-indigo-400"><i class="fa-solid fa-code-compare"></i></button>

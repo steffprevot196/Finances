@@ -185,6 +185,21 @@ function formatEUR(v) {
     return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(v || 0);
 }
 
+// Formatage des prix UNITAIRE (PRU, valeur unitaire courante).
+// Adapte le nombre de décimales à l'ordre de grandeur pour rester lisible
+// sur les cryptos fractionnaires (ex: 0,00001234 € pour SHIB).
+function formatUnitPrice(v) {
+    if (!Number.isFinite(v)) return '—';
+    const abs = Math.abs(v);
+    if (abs === 0) return '0,00 €';
+    const decimals = abs < 0.01 ? 8 : abs < 1 ? 4 : 2;
+    return new Intl.NumberFormat('fr-FR', {
+        style: 'currency', currency: 'EUR',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: decimals
+    }).format(v);
+}
+
 // --- Sécurité : échappement HTML pour les données importables (protection XSS) ---
 function escapeHTML(str) {
     if (str === null || str === undefined) return '';
