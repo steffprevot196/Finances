@@ -55,10 +55,54 @@ async function fetchCoinGeckoHistory(coingeckoId, days = 365) {
 }
 
 // ---------------------------------------------------------------------
-// Yahoo Finance via proxy CORS public (allorigins.win)
-// Yahoo n'autorise pas les requêtes cross-origin directes, on passe par un
-// proxy gratuit qui relaie et ajoute l'en-tête Access-Control-Allow-Origin.
-// La Chart API Yahoo accepte les tickers suffixés (.L, .PA, .DE, .MU…).
+// Twelve Data — API moderne avec CORS natif (pas de proxy, rapide, fiable)
+// Couvre toutes les places mondiales avec les mêmes suffixes que Yahoo :
+//   FLXC.DE (Francfort/Xetra), CEMA.L (Londres), STN.PA (Paris), QDVF.MU (Munich)
+// Plan Basic gratuit : 800 requêtes/jour, 8 requêtes/minute.
+// ---------------------------------------------------------------------
+async function fetchTwelveDataQuote(symbol) {
+    if (!twelveDataApiKey) return null;
+    try {
+        const url = `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(twelveDataApiKey)}`;
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data.status === 'error' || data.code) {
+            throw new Error(data.message || `Code ${data.code}`);
+        }
+        const price = parseFloat(data.close ?? data.previous_close);
+        return Number.isFinite(price) && price > 0 ? price : null;
+    } catch (err) {
+        console.warn(`TwelveData quote failed for ${symbol}:`, err);
+        throw err; // propagé pour affichage détaillé
+    }
+}
+
+async function fetchTwelveDataHistory(symbol, days = 365) {
+    if (!twelveDataApiKey) throw new Error('Clé Twelve Data manquante');
+    const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(symbol)}&interval=1day&outputsize=${days}&apikey=${encodeURIComponent(twelveDataApiKey)}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.status === 'error' || data.code) {
+        throw new Error(data.message || `Code ${data.code}`);
+    }
+    if (!Array.isArray(data.values)) throw new Error('Format de réponse inattendu');
+    return data.values
+        .map(v => ({ date: new Date(v.datetime).getTime(), price: parseFloat(v.close) }))
+        .filter(p => Number.isFinite(p.date) && Number.isFinite(p.price) && p.price > 0)
+        .sort((a, b) => a.date - b.date);
+}
+
+function saveTwelveDataKey() {
+    twelveDataApiKey = document.getElementById('twelve-key-input').value.trim();
+    localStorage.setItem('patriMonial_twelveDataKey', twelveDataApiKey);
+    const el = document.getElementById('twelve-status');
+    if (el) el.innerText = twelveDataApiKey ? '✅ Clé enregistrée' : '⚠️ Aucune clé';
+}
+
+// ---------------------------------------------------------------------
+// Yahoo Finance via proxy CORS public (allorigins.win) — fallback
 // ---------------------------------------------------------------------
 const YAHOO_PROXY = 'https://api.allorigins.win/raw?url=';
 
@@ -141,8 +185,7 @@ async function refreshRealPriceHistory() {
         } catch (err) { failed.push(ticker + ' (' + err.message + ')'); }
     }
 
-    // --- Actions / ETF via Yahoo Finance (proxy CORS) ---
-    // On stocke sous la clé EQUITY_<symbole> pour la reconnaître dans primeRealVolCache.
+    // --- Actions / ETF via Twelve Data (fallback Yahoo si non configuré) ---
     const equityAssets = assets.filter(a =>
         (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto')
     );
@@ -151,7 +194,12 @@ async function refreshRealPriceHistory() {
         if (!symbol) continue;
         const key = 'EQUITY_' + symbol.toUpperCase();
         try {
-            const series = await fetchYahooHistory(symbol);
+            let series;
+            if (twelveDataApiKey) {
+                series = await fetchTwelveDataHistory(symbol);
+            } else {
+                series = await fetchYahooHistory(symbol);
+            }
             if (series.length < 30) {
                 failed.push(`${symbol} (données insuffisantes : ${series.length} points)`);
                 continue;
@@ -159,7 +207,7 @@ async function refreshRealPriceHistory() {
             await priceDBSet(key, { updatedAt: Date.now(), series });
             done++;
         } catch (err) { failed.push(`${symbol} (${err.message})`); }
-        await new Promise(r => setTimeout(r, 200)); // courtoisie envers le proxy
+        await new Promise(r => setTimeout(r, twelveDataApiKey ? 8000 : 200));
     }
 
     if (icon) icon.classList.remove('fa-spin');
@@ -282,10 +330,9 @@ async function fetchLivePrices() {
         }
     } catch (err) { console.warn(err); }
 
-    // --- Actions / ETF : Yahoo Finance via proxy CORS ---
-    // Finnhub ne couvre pas les places européennes (.L, .PA, .DE, .MU…), donc
-    // on utilise Yahoo en source principale (le ticker Yahoo est le même format
-    // que celui saisi dans le champ "Ticker Yahoo Finance").
+    // --- Actions / ETF : cascade Twelve Data → Finnhub → Yahoo ---
+    // Twelve Data est la source principale (CORS natif, pas de proxy instable).
+    // Finnhub couvre uniquement les US. Yahoo reste en fallback ultime.
     const updatedStockIds = new Set();
     const stockAssets = assets.filter(a => (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto'));
     if (stockAssets.length) {
@@ -293,28 +340,44 @@ async function fetchLivePrices() {
         for (const a of stockAssets) {
             const symbol = a.yahooTicker || a.ticker;
             if (!symbol) continue;
-            try {
-                let price = null;
+            let price = null;
+            const sources = [];
 
-                // 1) Yahoo Finance (couvre les places européennes)
-                price = await fetchYahooQuote(symbol);
-
-                // 2) Fallback Finnhub si Yahoo échoue (souvent pour les US purs)
-                if (!price && finnhubApiKey) {
-                    price = await fetchFinnhubQuote(symbol);
+            // 1) Twelve Data (source principale, toutes places)
+            if (twelveDataApiKey) {
+                try {
+                    price = await fetchTwelveDataQuote(symbol);
+                    if (price) sources.push('Twelve Data');
+                    // 8 requêtes/min en gratuit → 7,5 s minimum entre appels
+                    await new Promise(r => setTimeout(r, 8000));
+                } catch (err) {
+                    sources.push(`Twelve Data: ${err.message}`);
                 }
+            }
 
-                if (price) {
-                    a.value = a.qty * price;
-                    upsertTodayHistoryPoint(a, a.value, a.invested);
-                    stockUpdated++;
-                    updatedStockIds.add(a.id);
-                } else {
-                    sourceErrors.push(`${a.name} (${symbol}) : aucun cours récupéré`);
-                }
-                await new Promise(r => setTimeout(r, 200)); // courtoisie proxy
-            } catch (err) {
-                sourceErrors.push(`${a.name} (${symbol}) : ${err.message}`);
+            // 2) Finnhub (US uniquement, rapide)
+            if (!price && finnhubApiKey) {
+                try {
+                    const p = await fetchFinnhubQuote(symbol);
+                    if (p) { price = p; sources.push('Finnhub'); }
+                } catch (err) { sources.push(`Finnhub: ${err.message}`); }
+            }
+
+            // 3) Yahoo via proxy (fallback ultime, instable)
+            if (!price) {
+                try {
+                    const p = await fetchYahooQuote(symbol);
+                    if (p) { price = p; sources.push('Yahoo'); }
+                } catch (err) { sources.push(`Yahoo: ${err.message}`); }
+            }
+
+            if (price) {
+                a.value = a.qty * price;
+                upsertTodayHistoryPoint(a, a.value, a.invested);
+                stockUpdated++;
+                updatedStockIds.add(a.id);
+            } else {
+                sourceErrors.push(`${a.name} (${symbol}) : ${sources.join(' | ')}`);
             }
         }
         if (stockUpdated > 0) updated += stockUpdated;
@@ -536,6 +599,11 @@ function initDriveSyncUI() {
     const finnhubStatus = document.getElementById('finnhub-status');
     if (finnhubInput) finnhubInput.value = finnhubApiKey;
     if (finnhubStatus) finnhubStatus.innerText = finnhubApiKey ? '✅ Clé enregistrée' : '⚠️ Aucune clé';
+
+    const twelveInput = document.getElementById('twelve-key-input');
+    const twelveStatus = document.getElementById('twelve-status');
+    if (twelveInput) twelveInput.value = twelveDataApiKey;
+    if (twelveStatus) twelveStatus.innerText = twelveDataApiKey ? '✅ Clé enregistrée' : '⚠️ Aucune clé — requise pour les ETF';
 
     // Met à jour le libellé du champ mot de passe si une clé est déjà mémorisée
     hasStoredMasterKey().then(has => {

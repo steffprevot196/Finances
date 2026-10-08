@@ -119,6 +119,7 @@ let lastRiskMetrics        = {};
 let realVolCache           = {};
 let realSeriesCache        = {};
 let finnhubApiKey          = localStorage.getItem('patriMonial_finnhubKey') || '';
+let twelveDataApiKey       = localStorage.getItem('patriMonial_twelveDataKey') || '';
 
 // =====================================================================
 // CONSTANTES MÉTIER

@@ -216,33 +216,104 @@ function openAssetDetailModal(id) {
     document.getElementById('modal-asset-detail').classList.remove('hidden');
 }
 
-// Affiche le tableau des lots dans le modal de détail de l'actif
+// Affiche le tableau des lots dans le modal de détail de l'actif.
+// Colonnes enrichies :
+//   - Prix lot    : prix d'achat unitaire (frais inclus) du lot
+//   - PRU cumulé  : PRU moyen pondéré jusqu'à ce lot inclus
+//                   → permet de voir si ce lot a fait monter ou baisser votre PRU
+//   - Val. actuelle : valeur unitaire de marché actuelle (identique sur chaque ligne)
+//   - P&L latent  : (valeur actuelle − prix lot) × qty restante
+//                   → réponse directe à "ce lot est-il en PV ou en MV ?"
 function renderAssetLotsTable(asset) {
     const tbody = document.getElementById('modal-asset-lots-body');
     if (!tbody) return;
     const lots = (asset.lots || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
 
     if (!lots.length) {
-        tbody.innerHTML = '<tr><td colspan="6" class="p-3 text-center text-gray-500 text-xs">Aucun lot enregistré.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" class="p-3 text-center text-gray-500 text-xs">Aucun lot enregistré.</td></tr>';
         return;
     }
 
-    tbody.innerHTML = lots.map(l => {
+    // Valeur unitaire de marché actuelle (valeur totale / quantité totale restante)
+    const totalQtyRemaining = lots.reduce((s, l) => s + (l.qtyRemaining || 0), 0);
+    const currentUnitValue  = totalQtyRemaining > 0 ? (asset.value / totalQtyRemaining) : 0;
+
+    // Accumulateurs pour le PRU cumulé et le P&L total
+    let cumQty  = 0;
+    let cumCost = 0;
+    let totalPnl = 0;
+    let totalPnlBase = 0;
+
+    const rowsHTML = lots.map(l => {
+        const lotUnitCost = (l.price || 0) + ((l.frais || 0) / (l.qty || 1));
+        cumQty  += (l.qty || 0);
+        cumCost += (l.qty || 0) * (l.price || 0) + (l.frais || 0);
+        const cumPRU = cumQty > 0 ? cumCost / cumQty : 0;
+
         const remaining = l.qtyRemaining || 0;
         const isSold = remaining <= 0;
+
+        // P&L latent sur les unités encore détenues
+        const pnlPerUnit = (currentUnitValue > 0 && !isSold) ? (currentUnitValue - lotUnitCost) : 0;
+        const pnlTotal   = pnlPerUnit * remaining;
+        const pnlPct     = lotUnitCost > 0 ? (pnlPerUnit / lotUnitCost) * 100 : 0;
+        const isPos      = pnlTotal >= 0;
+
+        if (!isSold && currentUnitValue > 0) {
+            totalPnl += pnlTotal;
+            totalPnlBase += lotUnitCost * remaining;
+        }
+
+        // Marqueur visuel : ce lot fait-il monter (↑) ou baisser (↓) le PRU cumulé ?
+        // Comparaison avec le PRU du lot précédent (avant ce lot) — utile seulement à partir du 2e lot.
+        const previousPRU = cumQty > (l.qty || 0)
+            ? (cumCost - ((l.qty || 0) * (l.price || 0) + (l.frais || 0))) / (cumQty - (l.qty || 0))
+            : null;
+        const pruArrow = previousPRU === null
+            ? ''
+            : (cumPRU > previousPRU + 1e-9
+                ? ' <i class="fa-solid fa-arrow-up text-[8px] text-rose-400/70" title="Ce lot a fait monter votre PRU"></i>'
+                : cumPRU < previousPRU - 1e-9
+                    ? ' <i class="fa-solid fa-arrow-down text-[8px] text-emerald-400/70" title="Ce lot a fait baisser votre PRU"></i>'
+                    : '');
+
         return `<tr class="${isSold ? 'opacity-40' : ''}">
             <td class="p-2.5 whitespace-nowrap">${l.date ? new Date(l.date).toLocaleDateString('fr-FR') : '—'}</td>
-            <td class="p-2.5 text-gray-400 truncate max-w-[140px]" title="${escapeHTML(l.reference || '')}">${escapeHTML(l.reference) || '—'}</td>
+            <td class="p-2.5 text-gray-400 truncate max-w-[110px]" title="${escapeHTML(l.reference || '')}">${escapeHTML(l.reference) || '—'}</td>
             <td class="p-2.5 text-right">${l.qty}</td>
             <td class="p-2.5 text-right ${remaining > 0 ? 'text-emerald-400 font-bold' : 'text-gray-500'}">${remaining}</td>
-            <td class="p-2.5 text-right">${formatEUR(l.price)}</td>
-            <td class="p-2.5 text-right text-gray-400">${formatEUR(l.frais || 0)}</td>
+            <td class="p-2.5 text-right text-gray-400">${formatUnitPrice(lotUnitCost)}</td>
+            <td class="p-2.5 text-right text-blue-300">${formatUnitPrice(cumPRU)}${pruArrow}</td>
+            <td class="p-2.5 text-right text-gray-300">${currentUnitValue > 0 ? formatUnitPrice(currentUnitValue) : '—'}</td>
+            <td class="p-2.5 text-right ${isSold ? 'text-gray-500' : (isPos ? 'text-emerald-400' : 'text-rose-400')}">
+                ${isSold || currentUnitValue <= 0
+                    ? '—'
+                    : `<div class="font-bold">${isPos ? '+' : ''}${formatEUR(pnlTotal)}</div>
+                       <div class="text-[10px] ${isPos ? 'text-emerald-400/70' : 'text-rose-400/70'}">${isPos ? '+' : ''}${pnlPct.toFixed(2)}%</div>`}
+            </td>
+            <td class="p-2.5 text-right text-gray-500">${formatEUR(l.frais || 0)}</td>
             <td class="p-2.5 text-center whitespace-nowrap">
                 <button type="button" aria-label="Modifier ce lot" title="Modifier ce lot" onclick="event.stopPropagation(); openEditLotModal(${asset.id}, ${l.id})" class="inline-flex items-center justify-center w-7 h-7 rounded-md bg-gray-800/60 text-gray-300 hover:bg-emerald-900/60 hover:text-emerald-300 transition"><i class="fa-solid fa-pen"></i></button>
                 <button type="button" aria-label="Supprimer ce lot" title="Supprimer ce lot" onclick="event.stopPropagation(); deleteLot(${asset.id}, ${l.id})" class="inline-flex items-center justify-center w-7 h-7 rounded-md bg-gray-800/60 text-gray-300 hover:bg-rose-900/60 hover:text-rose-300 transition"><i class="fa-solid fa-trash"></i></button>
             </td>
         </tr>`;
     }).join('');
+
+    // Ligne de synthèse : P&L latent total sur les lots actifs
+    const totalPnlClass = totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
+    const totalPnlPct = totalPnlBase > 0 ? (totalPnl / totalPnlBase * 100) : 0;
+    const summaryRow = totalPnlBase > 0
+        ? `<tr class="bg-gray-950/80 border-t-2 border-gray-700 font-bold">
+               <td colspan="7" class="p-2.5 text-right text-gray-400">Total P&amp;L latent sur les lots actifs :</td>
+               <td class="p-2.5 text-right ${totalPnlClass}">
+                   <div>${totalPnl >= 0 ? '+' : ''}${formatEUR(totalPnl)}</div>
+                   <div class="text-[10px] ${totalPnl >= 0 ? 'text-emerald-400/70' : 'text-rose-400/70'}">${totalPnl >= 0 ? '+' : ''}${totalPnlPct.toFixed(2)}%</div>
+               </td>
+               <td colspan="2" class="p-2.5"></td>
+           </tr>`
+        : '';
+
+    tbody.innerHTML = rowsHTML + summaryRow;
 }
 
 // ---------------------------------------------------------------------
