@@ -1250,25 +1250,24 @@ function handleAddCession(e) {
         }
 
         const selectedLotId = document.getElementById('cession-lot-id-hidden')?.value || '';
+
+        // Snapshot des qtyRemaining AVANT le dry-run : on peut ainsi
+        // restaurer sans risque même si le dry-run échoue en cours de route.
+        const snapshot = (assetToModify.lots || []).map(l => ({ id: l.id, qtyRemaining: l.qtyRemaining || 0 }));
+
         const dryRun = selectedLotId
             ? consumeLotById(assetToModify, selectedLotId, qtyToSell)
             : consumeFIFO(assetToModify, qtyToSell);
 
+        // Rollback inconditionnel depuis le snapshot (sur succès ET échec)
+        snapshot.forEach(s => {
+            const lot = (assetToModify.lots || []).find(l => String(l.id) === String(s.id));
+            if (lot) lot.qtyRemaining = s.qtyRemaining;
+        });
+
         if (dryRun.error) {
             alert(dryRun.error);
             return;
-        }
-        // Rollback : on restaure les lots tels qu'ils étaient avant le dry-run
-        // (consumeFIFO/consumeLotById mutent lot.qtyRemaining directement, il
-        // faut donc annuler explicitement).
-        if (selectedLotId) {
-            const lot = (assetToModify.lots || []).find(l => String(l.id) === String(selectedLotId));
-            if (lot) lot.qtyRemaining = (lot.qtyRemaining || 0) + qtyToSell;
-        } else {
-            dryRun.consumedLots.forEach(c => {
-                const lot = (assetToModify.lots || []).find(l => String(l.id) === String(c.lotId));
-                if (lot) lot.qtyRemaining = (lot.qtyRemaining || 0) + c.qty;
-            });
         }
     }
 

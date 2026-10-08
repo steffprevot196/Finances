@@ -262,6 +262,8 @@ async function importBinancePositions(apiKey, secretKey) {
 //   CB-ACCESS-KEY / CB-ACCESS-SIGN (HMAC-SHA256) qui est encore
 //   supporté par l'API v2.
 async function fetchCoinbaseBalances(apiKey, secretKey) {
+    throw new Error('Coinbase : l\'API v2 (CB-ACCESS-*) est dépréciée depuis 2023. Utilisez l\'export CSV officiel (menu « Documents » du compte Coinbase) puis la fonction « Import CSV ».');
+    // eslint-disable-next-line no-unreachable
     const path = '/v2/accounts?limit=100';
     const timestamp = Math.floor(Date.now() / 1000);
     const method = 'GET';
@@ -470,9 +472,9 @@ const BROKER_META = {
         color: 'text-blue-400',
         bg: 'bg-blue-950/30',
         bd: 'border-blue-700/50',
-        hint: 'Clé API créée sur Coinbase avec scope « wallet:accounts:read » uniquement.',
+        hint: '⚠ L\'API v2 de Coinbase (CB-ACCESS-*) est dépréciée depuis 2023. Utilisez l\'export CSV officiel de Coinbase — l\'import automatique n\'est plus supporté.',
         docUrl: 'https://www.coinbase.com/settings/api',
-        placeholder: { key: 'Clé API Coinbase (CB-ACCESS-KEY)', secret: 'Clé secrète (CB-ACCESS-SIGN)' }
+        placeholder: { key: 'Indisponible', secret: 'Indisponible' }
     },
     kraken: {
         label: 'Kraken',

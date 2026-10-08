@@ -92,8 +92,10 @@ function computeFireYearsToTarget() {
     const annualReturn = Math.max(-0.5, Number(fireConfig.expectedReturn) || 0.07);
     const inflation = Math.max(-0.5, Number(fireConfig.inflationRate) || 0.02);
 
-    // Rendement réel = nominal − inflation (approximation Fisher)
-    const realAnnualReturn = annualReturn - inflation;
+    // Rendement réel : formule de Fisher exacte (1+r)/(1+i) − 1
+    //   → sur des taux élevés (> 5 %), l'approximation (r − i) sous-estime
+    //     le rendement réel de plusieurs dixièmes de point par an.
+    const realAnnualReturn = (1 + annualReturn) / (1 + inflation) - 1;
     const rMonthly = realAnnualReturn / 12;
 
     let val = current;
@@ -134,7 +136,10 @@ function runFireMonteCarlo(numPaths = 5000, years = 50) {
     const monthlyPMT = Math.max(0, Number(fireConfig.monthlySavings) || 0);
     const annualReturn = Number(fireConfig.expectedReturn) || 0.07;
     const inflation = Number(fireConfig.inflationRate) || 0.02;
-    const realAnnualReturn = annualReturn - inflation;
+    // Rendement réel : formule de Fisher exacte (1+r)/(1+i) − 1
+    //   → cohérent avec computeFireYearsToTarget() pour que les deux
+    //     projections (déterministe + Monte-Carlo) racontent la même histoire.
+    const realAnnualReturn = (1 + annualReturn) / (1 + inflation) - 1;
     const meanMonthly = realAnnualReturn / 12;
 
     // Récupère la volatilité réelle du portefeuille
@@ -193,7 +198,8 @@ function runFireMonteCarlo(numPaths = 5000, years = 50) {
         volAnnual,
         realAnnualReturn,
         numPaths,
-        maxYears: years
+        maxYears: years,
+        yearsToTarget   // ← réutilisé par l'histogramme (évite 1000 re-simulations)
     };
 }
 
@@ -322,43 +328,22 @@ function renderFireMonteCarloChart() {
     const bins = new Array(BINS).fill(0);
     let unreached = 0;
 
-    // Re-simulation directe (1000 tirages) en stockant l'année d'atteinte
-    // de chaque trajectoire — méthode simple et robuste, aucune variable
-    // intermédiaire superflue.
+    // Réutilise les trajectoires déjà calculées par runFireMonteCarlo()
+    // (mc.yearsToTarget contient l'année d'atteinte de chaque trajectoire,
+    //  null si non atteinte sur l'horizon)
     const { current, target } = computeFireProgress();
     if (current >= target) {
         // Déjà FIRE
         bins[0] = 1;
-    } else {
-        const monthlyPMT = Math.max(0, Number(fireConfig.monthlySavings) || 0);
-        const annualReturn = Number(fireConfig.expectedReturn) || 0.07;
-        const inflation = Number(fireConfig.inflationRate) || 0.02;
-        const realAnnualReturn = annualReturn - inflation;
-        const meanMonthly = realAnnualReturn / 12;
-        const volMonthly = mc.volAnnual / Math.sqrt(12);
-        function gaussian() {
-            let u = 0, v = 0;
-            while (u === 0) u = Math.random();
-            while (v === 0) v = Math.random();
-            return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
-        }
-        for (let i = 0; i < 1000; i++) {
-            let val = current;
-            let reachedAt = null;
-            for (let m = 0; m < 50 * 12; m++) {
-                const r = meanMonthly + volMonthly * gaussian();
-                val = val * (1 + r) + monthlyPMT;
-                if (val < 0) val = 0;
-                if (val >= target) { reachedAt = m + 1; break; }
-            }
-            if (reachedAt !== null) {
-                const y = reachedAt / 12;
+    } else if (Array.isArray(mc.yearsToTarget)) {
+        mc.yearsToTarget.forEach(y => {
+            if (y === null) {
+                unreached++;
+            } else {
                 const idx = Math.min(BINS - 1, Math.floor(y / binWidth));
                 bins[idx]++;
-            } else {
-                unreached++;
             }
-        }
+        });
     }
 
     // Diagnostic console : combien de trajectoires n'atteignent pas la cible

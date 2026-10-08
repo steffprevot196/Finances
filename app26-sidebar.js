@@ -31,7 +31,7 @@ const SIDEBAR_SECTIONS = [
     {
         label: 'Vue globale',
         items: [
-            { id: 'tab-dashboard',  icon: 'fa-gauge-high',    label: 'Vue d\'ensemble',  color: 'text-emerald-400' }
+            { id: 'tab-dashboard',  icon: 'fa-house',         label: 'Accueil',          color: 'text-emerald-400' }
         ]
     },
     {

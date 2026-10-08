@@ -19,7 +19,7 @@
 // DÉFINITION DES ONGLETS
 // ---------------------------------------------------------------------
 const MOBILE_NAV_PRIMARY = [
-    { id: 'tab-dashboard',  icon: 'fa-gauge-high',       label: 'Vue' },
+    { id: 'tab-dashboard',  icon: 'fa-house',            label: 'Accueil' },
     { id: 'tab-inventaire', icon: 'fa-list-check',       label: 'Inv.' },
     { id: 'tab-gave',       icon: 'fa-compass',          label: 'Gave' },
     { id: 'tab-crypto',     icon: 'fa-bitcoin',          label: 'Crypto' }

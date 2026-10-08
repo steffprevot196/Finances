@@ -1626,8 +1626,18 @@ function _buildDailyPortfolioSeries(days = 365) {
             if (d && Number.isFinite(h.value)) allPoints.push({ date: d, id: a.id, value: h.value });
         });
     });
-    // Ajoute l'état actuel comme point "aujourd'hui"
-    assets.forEach(a => allPoints.push({ date: new Date(today), id: a.id, value: a.value || 0 }));
+    // Ajoute l'état actuel comme point "aujourd'hui", uniquement si aucun
+    // point daté d'aujourd'hui n'existe déjà dans l'historique (évite le doublon).
+    const todayStr = today.toDateString();
+    assets.forEach(a => {
+        const hasToday = (a.history || []).some(h => {
+            const d = parseFlexDate(h.date);
+            return d && d.toDateString() === todayStr;
+        });
+        if (!hasToday) {
+            allPoints.push({ date: new Date(today), id: a.id, value: a.value || 0 });
+        }
+    });
     allPoints.sort((a, b) => a.date - b.date);
 
     const lastValues = {};

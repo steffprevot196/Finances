@@ -547,7 +547,6 @@ function _applyOnboardingStep2() {
 // ---------------------------------------------------------------------
 // Redéfinition propre de nextOnboardingStep pour intégrer les actions
 // des étapes 1 et 2 AVANT de passer à la suivante.
-const _originalNextOnboardingStep = nextOnboardingStep;
 nextOnboardingStep = function () {
     const step = onboardingState.step;
     // Actions d'application selon l'étape en cours

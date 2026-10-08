@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta http-equiv="Content-Security-Policy"
+                <meta http-equiv="Content-Security-Policy"
           content="default-src 'self';
                    script-src 'self' 'unsafe-inline'
                               https://cdn.tailwindcss.com
@@ -30,7 +30,8 @@
                             https://cdnjs.cloudflare.com;
                    frame-ancestors 'none';
                    base-uri 'self';
-                   worker-src 'self';">>
+                   worker-src 'self';">
+                            
         <title>PatriMonial - Gestion & Suivi de Patrimoine</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
     <!-- Tailwind CSS -->
@@ -74,6 +75,9 @@
     <!-- HEADER GLOBAL -->
     <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-gray-800 pb-4">
         <div class="flex items-center gap-3">
+            <button type="button" onclick="openSidebarMobile()" class="lg:hidden w-9 h-9 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 hover:text-white transition flex items-center justify-center flex-shrink-0" title="Ouvrir le menu" aria-label="Ouvrir le menu">
+                <i class="fa-solid fa-bars"></i>
+            </button>
             <div class="w-11 h-11 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-emerald-900/30">
                 <i class="fa-solid fa-chart-pie"></i>
             </div>
@@ -217,172 +221,10 @@
         </div>
     </div>
 
-        <!-- METRICS / KPI BANNER — Positions actuelles -->
-    <div class="mb-3">
-        <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">📊 Positions actuelles</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Capital Investi</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-total-invested">0,00 €</div>
-                <div class="text-xs text-gray-500 mt-1 flex items-center justify-between">
-                    <span>Frais totaux :</span>
-                    <span class="font-mono text-gray-400" id="stat-total-frais">0,00 €</span>
-                </div>
-                <div class="absolute right-3 bottom-2 text-blue-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-vault"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Valeur de Marché</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-total-value">0,00 €</div>
-                <div class="text-xs text-emerald-400 mt-1 flex items-center gap-1">
-                    <i class="fa-solid fa-circle-check text-[10px]"></i> Mis à jour en temps réel
-                </div>
-                <div class="absolute right-3 bottom-2 text-emerald-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-chart-line"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Gain / Perte Potentiel</div>
-                <div class="text-2xl font-bold font-mono" id="stat-pnl">0,00 €</div>
-                <div class="text-xs font-semibold mt-1 font-mono" id="stat-pnl-pct">+0.00%</div>
-                <div class="absolute right-3 bottom-2 text-amber-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-arrow-trend-up"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-teal-900/40 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Gain / Perte hors frais</div>
-                <div class="text-2xl font-bold font-mono" id="stat-pnl-hf">0,00 €</div>
-                <div class="text-xs font-semibold mt-1 font-mono" id="stat-pnl-hf-pct">+0.00%</div>
-                <div class="text-[10px] text-gray-500 mt-0.5" id="stat-pnl-hf-detail">frais neutralisés : 0,00 €</div>
-                <div class="absolute right-3 bottom-2 text-teal-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-filter-circle-dollar"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Composition</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-asset-count">0 Actifs</div>
-                <div class="text-xs text-purple-400 mt-1 flex justify-between gap-2">
-                    <span>Gave : <b id="stat-gave-count">0</b></span>
-                    <span>Crypto : <b id="stat-crypto-count">0</b></span>
-                    <span>Hors : <b id="stat-hors-gave-count">0</b></span>
-                </div>
-                <div class="absolute right-3 bottom-2 text-purple-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-layer-group"></i></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- METRICS / KPI BANNER — Performance globale -->
-    <div class="mb-6">
-        <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">🎯 Performance globale</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-            <div class="bg-gray-900/80 border border-indigo-900/40 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Cessions Réalisées</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-realized-gross">0,00 €</div>
-                <div class="text-xs text-gray-500 mt-1" id="stat-realized-count">0 opération(s)</div>
-                <div class="absolute right-3 bottom-2 text-indigo-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-right-left"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-emerald-900/40 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Gain / Perte Réalisé</div>
-                <div class="text-2xl font-bold font-mono" id="stat-realized-pnl">0,00 €</div>
-                <div class="text-xs text-gray-500 mt-1 font-mono" id="stat-realized-pnl-pct">+0.00%</div>
-                <div class="absolute right-3 bottom-2 text-emerald-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-check-double"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-cyan-900/40 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">TRI Global (annualisé)</div>
-                <div class="text-2xl font-bold font-mono" id="stat-tir-global">—</div>
-                <div class="text-xs text-gray-500 mt-1" id="stat-tir-detail">pondéré par les flux</div>
-                <div class="absolute right-3 bottom-2 text-cyan-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-percent"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-rose-900/40 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Impôt Estimé</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-total-tax">0,00 €</div>
-                <div class="text-xs text-gray-500 mt-1">Net après impôt : <span class="font-mono text-gray-300" id="stat-realized-net">0,00 €</span></div>
-                <div class="absolute right-3 bottom-2 text-rose-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-receipt"></i></div>
-            </div>
-
-            <div class="bg-gradient-to-br from-indigo-950/60 to-purple-950/40 border border-indigo-800/50 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-indigo-300 mb-1">Gain / Perte Total</div>
-                <div class="text-2xl font-bold font-mono text-white" id="stat-total-pnl">0,00 €</div>
-                <div class="text-xs text-indigo-300 mt-1 font-mono" id="stat-total-pnl-pct">+0.00%</div>
-                <div class="absolute right-3 bottom-2 text-indigo-400/10 text-5xl pointer-events-none"><i class="fa-solid fa-trophy"></i></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- METRICS / KPI BANNER — Revenus passifs (Chantier 1.1) -->
-    <div class="mb-6">
-        <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">💰 Revenus passifs (dividendes & coupons)</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="bg-gray-900/80 border border-emerald-900/40 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Revenus 12 mois glissants</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-dividends-12m">0,00 €</div>
-                <div class="text-xs text-gray-500 mt-1" id="stat-dividends-count">0 versement(s)</div>
-                <div class="absolute right-3 bottom-2 text-emerald-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-sack-dollar"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Rendement moyen du portefeuille</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-dividends-yield">0.00 %</div>
-                <div class="text-xs text-gray-500 mt-1">sur capital investi actuel</div>
-                <div class="absolute right-3 bottom-2 text-blue-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-percent"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-teal-900/40 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Revenus bruts (avant retenue)</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-dividends-gross">0,00 €</div>
-                <div class="text-xs text-gray-500 mt-1">retenue à la source : <span class="font-mono text-gray-400" id="stat-dividends-withheld">0,00 €</span></div>
-                <div class="absolute right-3 bottom-2 text-teal-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-coins"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-amber-900/40 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Fiscalité estimée dividendes</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-dividends-tax">0,00 €</div>
-                <div class="text-xs text-gray-500 mt-1">PFU 30 % par défaut (hors PEA/AV)</div>
-                <div class="absolute right-3 bottom-2 text-amber-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-receipt"></i></div>
-            </div>
-        </div>
-    </div>
-
-    <!-- METRICS / KPI BANNER — Exposition devise (Chantier 1.2) -->
-    <div class="mb-6">
-        <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">🌍 Exposition devise</div>
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Devise dominante</div>
-                <div class="text-2xl font-bold text-white font-mono flex items-center gap-2" id="stat-fx-dominant">
-                    <span>—</span>
-                </div>
-                <div class="text-xs text-gray-500 mt-1" id="stat-fx-dominant-pct">— % du portefeuille</div>
-                <div class="absolute right-3 bottom-2 text-indigo-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-flag"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Exposition hors EUR</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-fx-foreign-pct">0.0 %</div>
-                <div class="text-xs text-gray-500 mt-1">valeur convertie au taux courant</div>
-                <div class="absolute right-3 bottom-2 text-blue-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-globe"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-1">Devises utilisées</div>
-                <div class="text-2xl font-bold text-white font-mono" id="stat-fx-count">0</div>
-                <div class="text-xs text-gray-500 mt-1">nombre de devises distinctes</div>
-                <div class="absolute right-3 bottom-2 text-purple-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-coins"></i></div>
-            </div>
-
-            <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
-                <div class="text-xs font-medium text-gray-400 mb-2">Répartition (top 3)</div>
-                <div id="stat-fx-breakdown" class="space-y-1.5">
-                    <div class="text-[11px] text-gray-500 italic">Aucune devise étrangère</div>
-                </div>
-                <div class="absolute right-3 bottom-2 text-teal-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-chart-simple"></i></div>
-            </div>
-        </div>
-    </div>
-    <!-- NAVIGATION TABS -->
+        <!-- NAVIGATION TABS -->
     <nav class="flex items-center gap-2 md:gap-6 border-b border-gray-800 mb-6 overflow-x-auto text-sm pb-1">
         <button onclick="switchTab('tab-dashboard')" id="btn-tab-dashboard" class="nav-tab active py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
-            <i class="fa-solid fa-gauge-high"></i> Vue d'ensemble
+            <i class="fa-solid fa-house"></i> Accueil
         </button>
         <button onclick="switchTab('tab-inventaire')" id="btn-tab-inventaire" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
             <i class="fa-solid fa-list-check"></i> Inventaire
@@ -420,8 +262,172 @@
     <!-- MAIN CONTENT AREA -->
     <main class="flex-grow">
 
-        <!-- TAB 0 : VUE D'ENSEMBLE -->
+        <!-- TAB 0 : ACCUEIL (KPI + Vue d'ensemble) -->
         <section id="tab-dashboard" class="tab-content space-y-6">
+
+            <!-- KPI BANNER — Positions actuelles -->
+            <div>
+                <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">📊 Positions actuelles</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                    <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Capital Investi</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-total-invested">0,00 €</div>
+                        <div class="text-xs text-gray-500 mt-1 flex items-center justify-between">
+                            <span>Frais totaux :</span>
+                            <span class="font-mono text-gray-400" id="stat-total-frais">0,00 €</span>
+                        </div>
+                        <div class="absolute right-3 bottom-2 text-blue-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-vault"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Valeur de Marché</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-total-value">0,00 €</div>
+                        <div class="text-xs text-emerald-400 mt-1 flex items-center gap-1">
+                            <i class="fa-solid fa-circle-check text-[10px]"></i> Mis à jour en temps réel
+                        </div>
+                        <div class="absolute right-3 bottom-2 text-emerald-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-chart-line"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Gain / Perte Potentiel</div>
+                        <div class="text-2xl font-bold font-mono" id="stat-pnl">0,00 €</div>
+                        <div class="text-xs font-semibold mt-1 font-mono" id="stat-pnl-pct">+0.00%</div>
+                        <div class="absolute right-3 bottom-2 text-amber-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-arrow-trend-up"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-teal-900/40 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Gain / Perte hors frais</div>
+                        <div class="text-2xl font-bold font-mono" id="stat-pnl-hf">0,00 €</div>
+                        <div class="text-xs font-semibold mt-1 font-mono" id="stat-pnl-hf-pct">+0.00%</div>
+                        <div class="text-[10px] text-gray-500 mt-0.5" id="stat-pnl-hf-detail">frais neutralisés : 0,00 €</div>
+                        <div class="absolute right-3 bottom-2 text-teal-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-filter-circle-dollar"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Composition</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-asset-count">0 Actifs</div>
+                        <div class="text-xs text-purple-400 mt-1 flex justify-between gap-2">
+                            <span>Gave : <b id="stat-gave-count">0</b></span>
+                            <span>Crypto : <b id="stat-crypto-count">0</b></span>
+                            <span>Hors : <b id="stat-hors-gave-count">0</b></span>
+                        </div>
+                        <div class="absolute right-3 bottom-2 text-purple-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-layer-group"></i></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KPI BANNER — Performance globale -->
+            <div>
+                <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">🎯 Performance globale</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+                    <div class="bg-gray-900/80 border border-indigo-900/40 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Cessions Réalisées</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-realized-gross">0,00 €</div>
+                        <div class="text-xs text-gray-500 mt-1" id="stat-realized-count">0 opération(s)</div>
+                        <div class="absolute right-3 bottom-2 text-indigo-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-right-left"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-emerald-900/40 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Gain / Perte Réalisé</div>
+                        <div class="text-2xl font-bold font-mono" id="stat-realized-pnl">0,00 €</div>
+                        <div class="text-xs text-gray-500 mt-1 font-mono" id="stat-realized-pnl-pct">+0.00%</div>
+                        <div class="absolute right-3 bottom-2 text-emerald-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-check-double"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-cyan-900/40 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">TRI Global (annualisé)</div>
+                        <div class="text-2xl font-bold font-mono" id="stat-tir-global">—</div>
+                        <div class="text-xs text-gray-500 mt-1" id="stat-tir-detail">pondéré par les flux</div>
+                        <div class="absolute right-3 bottom-2 text-cyan-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-percent"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-rose-900/40 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Impôt Estimé</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-total-tax">0,00 €</div>
+                        <div class="text-xs text-gray-500 mt-1">Net après impôt : <span class="font-mono text-gray-300" id="stat-realized-net">0,00 €</span></div>
+                        <div class="absolute right-3 bottom-2 text-rose-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-receipt"></i></div>
+                    </div>
+
+                    <div class="bg-gradient-to-br from-indigo-950/60 to-purple-950/40 border border-indigo-800/50 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-indigo-300 mb-1">Gain / Perte Total</div>
+                        <div class="text-2xl font-bold font-mono text-white" id="stat-total-pnl">0,00 €</div>
+                        <div class="text-xs text-indigo-300 mt-1 font-mono" id="stat-total-pnl-pct">+0.00%</div>
+                        <div class="absolute right-3 bottom-2 text-indigo-400/10 text-5xl pointer-events-none"><i class="fa-solid fa-trophy"></i></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KPI BANNER — Revenus passifs (Chantier 1.1) -->
+            <div>
+                <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">💰 Revenus passifs (dividendes & coupons)</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="bg-gray-900/80 border border-emerald-900/40 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Revenus 12 mois glissants</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-dividends-12m">0,00 €</div>
+                        <div class="text-xs text-gray-500 mt-1" id="stat-dividends-count">0 versement(s)</div>
+                        <div class="absolute right-3 bottom-2 text-emerald-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-sack-dollar"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Rendement moyen du portefeuille</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-dividends-yield">0.00 %</div>
+                        <div class="text-xs text-gray-500 mt-1">sur capital investi actuel</div>
+                        <div class="absolute right-3 bottom-2 text-blue-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-percent"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-teal-900/40 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Revenus bruts (avant retenue)</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-dividends-gross">0,00 €</div>
+                        <div class="text-xs text-gray-500 mt-1">retenue à la source : <span class="font-mono text-gray-400" id="stat-dividends-withheld">0,00 €</span></div>
+                        <div class="absolute right-3 bottom-2 text-teal-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-coins"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-amber-900/40 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Fiscalité estimée dividendes</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-dividends-tax">0,00 €</div>
+                        <div class="text-xs text-gray-500 mt-1">PFU 30 % par défaut (hors PEA/AV)</div>
+                        <div class="absolute right-3 bottom-2 text-amber-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-receipt"></i></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- KPI BANNER — Exposition devise (Chantier 1.2) -->
+            <div>
+                <div class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-2 px-1">🌍 Exposition devise</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Devise dominante</div>
+                        <div class="text-2xl font-bold text-white font-mono flex items-center gap-2" id="stat-fx-dominant">
+                            <span>—</span>
+                        </div>
+                        <div class="text-xs text-gray-500 mt-1" id="stat-fx-dominant-pct">— % du portefeuille</div>
+                        <div class="absolute right-3 bottom-2 text-indigo-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-flag"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Exposition hors EUR</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-fx-foreign-pct">0.0 %</div>
+                        <div class="text-xs text-gray-500 mt-1">valeur convertie au taux courant</div>
+                        <div class="absolute right-3 bottom-2 text-blue-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-globe"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-1">Devises utilisées</div>
+                        <div class="text-2xl font-bold text-white font-mono" id="stat-fx-count">0</div>
+                        <div class="text-xs text-gray-500 mt-1">nombre de devises distinctes</div>
+                        <div class="absolute right-3 bottom-2 text-purple-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-coins"></i></div>
+                    </div>
+
+                    <div class="bg-gray-900/80 border border-gray-800 rounded-xl p-4 relative overflow-hidden">
+                        <div class="text-xs font-medium text-gray-400 mb-2">Répartition (top 3)</div>
+                        <div id="stat-fx-breakdown" class="space-y-1.5">
+                            <div class="text-[11px] text-gray-500 italic">Aucune devise étrangère</div>
+                        </div>
+                        <div class="absolute right-3 bottom-2 text-teal-500/10 text-5xl pointer-events-none"><i class="fa-solid fa-chart-simple"></i></div>
+                    </div>
+                </div>
+            </div>
+
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div id="dashboard-alloc-card" class="lg:col-span-1 bg-gray-900/60 border border-gray-800 rounded-xl p-5 flex flex-col">
                     <div class="flex justify-between items-start gap-3 mb-3">
@@ -2543,7 +2549,7 @@
         </div>
     </div>
 
-    <!-- MODAL : ONBOARDING WIZARD (Chantier 2.3) -->
+        <!-- MODAL : ONBOARDING WIZARD (Chantier 2.3) -->
     <div id="modal-onboarding" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[70] hidden">
         <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
 
@@ -2590,14 +2596,16 @@
                 <button onclick="skipOnboardingOnce()" class="text-[11px] text-gray-500 hover:text-gray-300 transition order-2 sm:order-1" title="Fermer et reprendre plus tard">
                     <i class="fa-solid fa-clock-rotate-left text-[10px] mr-1"></i> Reprendre plus tard
                 </button>
-                
-                <div class="pt-2 flex justify-end gap-2 border-t border-gray-800">
-                    <button type="button" onclick="closeModal('modal-fire-config')" class="px-4 py-2 rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700">Annuler</button>
-                    <button type="submit" class="px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white font-medium">
-                        <i class="fa-solid fa-fire text-[10px] mr-1"></i> Enregistrer la config
+                <div class="flex gap-2 order-1 sm:order-2">
+                    <button type="button" id="onboarding-prev-btn" onclick="prevOnboardingStep()" class="hidden px-4 py-2 rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700 text-xs font-medium transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-arrow-left text-[10px]"></i> Précédent
+                    </button>
+                    <button type="button" onclick="nextOnboardingStep()" class="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition flex items-center gap-1.5">
+                        <span id="onboarding-next-label">Suivant</span>
+                        <i id="onboarding-next-icon" class="fa-solid fa-arrow-right text-[10px]"></i>
                     </button>
                 </div>
-            </form>
+            </div>
         </div>
     </div>
 
