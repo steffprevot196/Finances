@@ -379,6 +379,11 @@ function handleAddAsset(e) {
             history: [{ date: purchaseDateFR, value: invested, invested }],
             lots
         }, fields, bond || {});
+
+        // Paper trading : tout nouvel actif créé pendant que le mode est actif
+        // reçoit le flag `isPaper`. Il peut être promu en réel plus tard.
+        if (paperMode) newAsset.isPaper = true;
+
         normalizeAsset(newAsset);
         syncAssetFromLots(newAsset);
         // La qty réelle peut différer de la qty saisie si le nombre de références
@@ -1186,7 +1191,7 @@ function openRecapModal() {
             </div>
         </div>
         <div class="text-[10px] text-gray-500 font-sans leading-relaxed">Basé sur ${securities.length} cession(s) CTO/crypto, ${metals.length} cession(s) de métaux/jetons et ${enveloppes.length} cession(s) en enveloppe PEA/Assurance-Vie/PER enregistrée(s) dans le registre. Cette estimation est fournie à titre indicatif et ne remplace pas les cases précises de votre déclaration de revenus (2042, 2086, 2074...) ni l'avis d'un professionnel — en particulier pour le PER, dont la fiscalité dépend fortement du mode de sortie et de la déductibilité des versements.</div>
-        <button onclick="window.print()" class="w-full mt-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium flex items-center justify-center gap-2 font-sans"><i class="fa-solid fa-print"></i> Imprimer / Exporter en PDF</button>
+        <button onclick="exportRecapPDF()" class="w-full mt-2 px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium flex items-center justify-center gap-2 font-sans"><i class="fa-solid fa-file-pdf"></i> Exporter en PDF (mise en page A4)</button>
     `;
     document.getElementById('modal-recap').classList.remove('hidden');
 }
@@ -1295,4 +1300,692 @@ function calculateMetalTaxSim() {
     }
 
     box.innerHTML = html;
+}
+
+
+// =====================================================================
+// IMPORT CSV / EXCEL — utiliser SheetJS (déjà chargé dans index.html)
+// Supporte : AuCoffre, Trade Republic, Boursorama, Scalable, Revolut…
+// Chaque ligne devient un nouveau lot (fusion si ticker existant).
+// =====================================================================
+let _csvRows = [];
+let _csvHeaders = [];
+
+const CSV_FIELD_DEFS = [
+    { key: 'name',   label: 'Nom du produit *',   patterns: ['nom','name','produit','libell','designation','description','title'] },
+    { key: 'ticker', label: 'Ticker / Symbole',    patterns: ['ticker','symbole','symbol','code','ref'] },
+    { key: 'qty',    label: 'Quantité *',          patterns: ['quantit','quantity','qty','nombre','shares','unit'] },
+    { key: 'price',  label: "Prix d'achat unitaire *", patterns: ["prix d'achat",'prix achat','prix unitaire','prix','price','cours','purchase price'] },
+    { key: 'date',   label: "Date d'achat",        patterns: ["date d'achat",'date achat','date','purchase date'] },
+    { key: 'frais',  label: 'Frais / Commission',  patterns: ['frais','commission','fee','courtage'] }
+];
+
+// Parse un nombre au format FR (1.234,56) ou EN (1,234.56)
+function _parseNumberLoose(raw) {
+    if (typeof raw === 'number') return raw;
+    if (raw === null || raw === undefined) return NaN;
+    let s = String(raw).trim().replace(/\s/g, '').replace(/[€$£]/g, '');
+    if (s === '') return NaN;
+    const hasComma = s.includes(',');
+    const hasDot = s.includes('.');
+    if (hasComma && hasDot) {
+        // Si la virgule est après le point → format FR (le point = milliers)
+        if (s.lastIndexOf(',') > s.lastIndexOf('.')) s = s.replace(/\./g, '').replace(',', '.');
+        else s = s.replace(/,/g, '');
+    } else if (hasComma) {
+        s = s.replace(',', '.');
+    }
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? n : NaN;
+}
+
+function openCsvImportModal() {
+    resetCsvImport();
+    document.getElementById('modal-csv-import').classList.remove('hidden');
+}
+
+function resetCsvImport() {
+    _csvRows = [];
+    _csvHeaders = [];
+    const s1 = document.getElementById('csv-step-1');
+    const s2 = document.getElementById('csv-step-2');
+    const btn = document.getElementById('csv-import-btn');
+    if (s1) s1.classList.remove('hidden');
+    if (s2) s2.classList.add('hidden');
+    if (btn) btn.classList.add('hidden');
+    const inp = document.getElementById('input-import-csv');
+    if (inp) inp.value = '';
+}
+
+function handleImportCSVFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+        try {
+            if (typeof XLSX === 'undefined') { alert('SheetJS non chargé — vérifiez votre connexion internet.'); return; }
+            const data = new Uint8Array(ev.target.result);
+            const wb = XLSX.read(data, { type: 'array', cellDates: true });
+            const ws = wb.Sheets[wb.SheetNames[0]];
+            const json = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+
+            if (!json.length || json.length < 2) { alert('Fichier vide ou trop court.'); return; }
+
+            _csvHeaders = (json[0] || []).map(h => String(h || '').trim());
+            _csvRows = json.slice(1).filter(r => r.some(c => String(c || '').trim() !== ''));
+            if (!_csvRows.length) { alert('Aucune ligne de données détectée.'); return; }
+
+            renderCsvMapping();
+            renderCsvPreview();
+            document.getElementById('csv-step-1').classList.add('hidden');
+            document.getElementById('csv-step-2').classList.remove('hidden');
+            document.getElementById('csv-import-btn').classList.remove('hidden');
+        } catch (err) {
+            alert('Erreur de lecture du fichier : ' + err.message);
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function _headerMatches(header, patterns) {
+    const h = String(header || '').toLowerCase().trim();
+    return patterns.some(p => h.includes(p));
+}
+
+function renderCsvMapping() {
+    const container = document.getElementById('csv-column-mapping');
+    container.innerHTML = CSV_FIELD_DEFS.map(f => {
+        let detected = '';
+        _csvHeaders.forEach((h, i) => {
+            if (detected === '' && _headerMatches(h, f.patterns)) detected = i;
+        });
+        const opts = '<option value="">— Ignorer —</option>' + _csvHeaders.map((h, i) =>
+            `<option value="${i}" ${String(detected) === String(i) ? 'selected' : ''}>${escapeHTML(h || '(colonne ' + (i + 1) + ')')}</option>`
+        ).join('');
+        return `<div>
+            <label class="block text-[10px] text-gray-400 uppercase mb-1">${escapeHTML(f.label)}</label>
+            <select data-csv-field="${f.key}" onchange="renderCsvPreview()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-1.5 text-white text-xs focus:outline-none focus:border-teal-500">${opts}</select>
+        </div>`;
+    }).join('');
+}
+
+function getCsvFieldMap() {
+    const map = {};
+    document.querySelectorAll('#csv-column-mapping select[data-csv-field]').forEach(sel => {
+        if (sel.value !== '') map[sel.dataset.csvField] = parseInt(sel.value);
+    });
+    return map;
+}
+
+function renderCsvPreview() {
+    const thead = document.getElementById('csv-preview-header');
+    const tbody = document.getElementById('csv-preview-body');
+    thead.innerHTML = _csvHeaders.map(h => `<th class="p-2 text-left">${escapeHTML(h || '')}</th>`).join('');
+    const rows = _csvRows.slice(0, 20).map(r =>
+        `<tr class="border-t border-gray-800/60">${
+            _csvHeaders.map((_, i) => `<td class="p-2 text-[11px]">${escapeHTML(String(r[i] ?? ''))}</td>`).join('')
+        }</tr>`
+    ).join('');
+    tbody.innerHTML = rows + (_csvRows.length > 20
+        ? `<tr><td colspan="${_csvHeaders.length}" class="p-2 text-center text-gray-500 text-[11px]">… et ${_csvRows.length - 20} autres lignes</td></tr>`
+        : '');
+}
+
+function confirmCsvImport() {
+    const map = getCsvFieldMap();
+    if (map.name === undefined || map.qty === undefined || map.price === undefined) {
+        alert('Vous devez mapper au minimum : Nom, Quantité et Prix d\'achat.');
+        return;
+    }
+    const mergeDup = document.getElementById('csv-merge-duplicates').checked;
+    const dryRun = document.getElementById('csv-dryrun').checked;
+
+    // Skeleton immédiat sur l'inventaire pendant la construction des actifs
+    if (!dryRun) showSkeletonFor('#table-inventory-body', 6, 13);
+
+    let created = 0, merged = 0, skipped = 0;
+    const todayISO = new Date().toISOString().slice(0, 10);
+
+    _csvRows.forEach((row, lineNo) => {
+        const name = String(row[map.name] || '').trim();
+        if (!name) { skipped++; return; }
+
+        const ticker = map.ticker !== undefined
+            ? (String(row[map.ticker] || '').trim().toUpperCase() || name.slice(0, 6).toUpperCase().replace(/\s/g, ''))
+            : name.slice(0, 6).toUpperCase().replace(/\s/g, '');
+
+        const qty = _parseNumberLoose(row[map.qty]);
+        const price = _parseNumberLoose(row[map.price]);
+        const frais = map.frais !== undefined ? (_parseNumberLoose(row[map.frais]) || 0) : 0;
+
+        let dateISO = todayISO;
+        let dateFR = new Date().toLocaleDateString('fr-FR');
+        if (map.date !== undefined && row[map.date]) {
+            const d = parseFlexDate(String(row[map.date]).trim());
+            if (d) {
+                dateISO = d.toISOString().slice(0, 10);
+                dateFR = d.toLocaleDateString('fr-FR');
+            }
+        }
+
+        if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(price) || price < 0) {
+            skipped++;
+            return;
+        }
+
+        // Fusion avec un actif existant ?
+        const existing = mergeDup ? assets.find(a => (a.ticker || '').toUpperCase() === ticker) : null;
+
+        if (existing) {
+            if (!dryRun) {
+                const oldUnit = existing.qty > 0 ? (existing.value / existing.qty) : price;
+                existing.lots = (existing.lots || []).concat([ makeLot(dateISO, qty, price, frais, '') ]);
+                existing.buys = (existing.buys || []).concat([{ date: dateFR, type: 'Import CSV', qty, price, frais, total: qty * price + frais }]);
+                syncAssetFromLots(existing);
+                existing.value = Math.round(existing.qty * oldUnit * 100) / 100;
+                upsertTodayHistoryPoint(existing, existing.value, existing.invested);
+            }
+            merged++;
+        } else {
+            const newAsset = {
+                id: Date.now() + Math.floor(Math.random() * 100000),
+                name, ticker,
+                categories: ['Action'],
+                taxCategory: 'NON_CONCERNE',
+                cadrans: { primary: 'HORS_GAVE', secondary: [] },
+                cadran: 'HORS_GAVE',
+                qty, frais, invested: qty * price + frais, value: qty * price,
+                envelope: 'CTO',
+                envelopeOpenedAt: '',
+                zone: 'UE',
+                valuationMode: 'QUOTE',
+                yahooTicker: '',
+                purchaseDate: dateISO,
+                broker: 'Import CSV',
+                lots: [ makeLot(dateISO, qty, price, frais, '') ],
+                buys: [{ date: dateFR, type: 'Import CSV', qty, price, frais, total: qty * price + frais }],
+                history: [{ date: dateFR, value: qty * price, invested: qty * price + frais }]
+            };
+            if (!dryRun) {
+                // Paper trading : les imports en mode actif deviennent des positions papier
+                if (paperMode) newAsset.isPaper = true;
+                normalizeAsset(newAsset);
+                assets.push(newAsset);
+            }
+            created++;
+        }
+    });
+
+    if (!dryRun) {
+        saveToStorage();
+        refreshAllUI();
+    }
+    closeModal('modal-csv-import');
+
+    alert(
+        `Import ${dryRun ? '(PRÉVISUALISATION) ' : ''}terminé :\n` +
+        `• ${created} nouvel/aux actif(s)\n` +
+        `• ${merged} lot(s) ajouté(s) à des actifs existants\n` +
+        `• ${skipped} ligne(s) ignorée(s) (données manquantes ou invalides)`
+    );
+}
+
+
+// =====================================================================
+// DUPLICATION D'UN ACTIF (variantes rapides : Vera Valor 1/10, 1/20…)
+// =====================================================================
+function duplicateAsset(id) {
+    const source = assets.find(a => a.id === id);
+    if (!source) return;
+
+    document.getElementById('dup-source-id').value = id;
+    document.getElementById('dup-source-label').innerText =
+        `${source.name} (${source.ticker}) — ${formatEUR(source.value || 0)}`;
+
+    // Pré-remplissage intelligent :
+    // - Nom : "Nom source — variante" (l'utilisateur remplace "variante" par 1/10, 1/20…)
+    // - Ticker : "TICKER-2" — l'utilisateur ajuste (VV1/10OZ, VV1/2OZ…)
+    // - Quantité / Prix : ceux de la source (PRU fiscal recalculé des lots)
+    // - Date / Frais : aujourd'hui, 0 €
+    document.getElementById('dup-name').value = source.name + ' — variante';
+    document.getElementById('dup-ticker').value = source.ticker + '-2';
+    document.getElementById('dup-qty').value = source.qty || 1;
+
+    const pru = computePRUFromLots(source) || (source.qty > 0 ? source.invested / source.qty : 0);
+    document.getElementById('dup-price').value = pru > 0 ? pru.toFixed(4) : '';
+    document.getElementById('dup-date').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('dup-frais').value = 0;
+
+    document.getElementById('modal-duplicate-asset').classList.remove('hidden');
+    setTimeout(() => document.getElementById('dup-name').select(), 50);
+}
+
+function handleDuplicateAsset(e) {
+    e.preventDefault();
+    const sourceId = parseFloat(document.getElementById('dup-source-id').value);
+    const source = assets.find(a => a.id === sourceId);
+    if (!source) { alert('Actif source introuvable.'); return; }
+
+    const name   = document.getElementById('dup-name').value.trim();
+    const ticker = document.getElementById('dup-ticker').value.trim().toUpperCase();
+    const qty    = parseFloat(document.getElementById('dup-qty').value) || 0;
+    const price  = parseFloat(document.getElementById('dup-price').value) || 0;
+    const frais  = parseFloat(document.getElementById('dup-frais').value) || 0;
+    const dateISO = document.getElementById('dup-date').value || new Date().toISOString().slice(0, 10);
+    const dateFR  = new Date(dateISO).toLocaleDateString('fr-FR');
+
+    if (!name || !ticker) { alert('Nom et ticker sont requis.'); return; }
+    if (qty <= 0 || price < 0) { alert('Quantité et prix doivent être positifs.'); return; }
+
+    // Alerte douce si le ticker existe déjà (l'utilisateur peut vouloir créer une
+    // variante ou écraser volontairement — on ne bloque pas, on prévient).
+    const dupTicker = assets.find(a => a.id !== sourceId && (a.ticker || '').toUpperCase() === ticker);
+    if (dupTicker && !confirm(`Un actif avec le ticker "${ticker}" existe déjà :\n"${dupTicker.name}"\n\nCréer quand même la copie ?`)) return;
+
+    // Clone superficiel : on garde categories, cadrans, envelope, taxCategory,
+    // isin, broker, valuationMode, zone, yahooTicker… puis on écrase les champs
+    // spécifiques au lot et on repart d'un historique propre.
+    const clone = JSON.parse(JSON.stringify(source));
+    clone.id           = Date.now() + Math.floor(Math.random() * 100000);
+    clone.name         = name;
+    clone.ticker       = ticker;
+    clone.qty          = qty;
+    clone.frais        = frais;
+    clone.invested     = qty * price + frais;
+    clone.value        = qty * price;
+    clone.purchaseDate = dateISO;
+
+    // Lot unique neuf, historique neuf, aucun flag résiduel de migration/override
+    clone.lots    = [ makeLot(dateISO, qty, price, frais, '') ];
+    clone.buys    = [{ date: dateFR, type: 'Copie', qty, price, frais, total: clone.invested }];
+    clone.history = [{ date: dateFR, value: clone.value, invested: clone.invested }];
+    delete clone.needsReclass;
+    delete clone.reclassSuggestion;
+    delete clone.manualValueOverride;
+    delete clone.manualUpdateDate;
+    delete clone.manualUpdateSource;
+
+    normalizeAsset(clone);
+    assets.push(clone);
+
+    saveToStorage();
+    closeModal('modal-duplicate-asset');
+    refreshAllUI();
+
+    // Redirige vers la copie : c'est presque toujours l'intention de l'utilisateur
+    // qui vient de dupliquer (pour l'éditer juste après).
+    setTimeout(() => openEditAssetModal(clone.id), 80);
+}
+
+
+// =====================================================================
+// EXPORT PDF — Récapitulatif fiscal (mise en page A4 dédiée)
+// Injecte un DOM HTML complet dans #print-fiscal-recap, puis déclenche
+// l'impression. Le CSS @media print masque tout le reste de l'app.
+// =====================================================================
+function exportRecapPDF() {
+    const container = document.getElementById('print-fiscal-recap');
+    if (!container) { alert('Conteneur d\'impression introuvable.'); return; }
+
+    const tax = (typeof computeTaxBreakdown === 'function')
+        ? computeTaxBreakdown()
+        : {
+            selectedTotal: 0, metalsTaxTotal: 0, enveloppesTaxTotal: 0, totalImpot: 0,
+            plusValuesBrutes: 0, moinsValuesBrutes: 0, netForPFU: 0, totalBrutVentes: 0,
+            securitiesCount: 0, pfuTotal: 0, baremeTotal: 0,
+            pfuIR: 0, pfuPS: 0, baremeIR: 0, baremePS: 0, csgDeductible: 0
+        };
+
+    const regimeLabel = taxRegimeMode === 'PFU'
+        ? 'PFU / Flat Tax (30 % — 12,8 % IR + 17,2 % PS)'
+        : `Barème Progressif (TMI ${(taxTMI * 100).toFixed(0)} %)`;
+
+    const exercise = new Date().getFullYear() - 1;  // exercice N-1
+    const nowFR    = new Date().toLocaleString('fr-FR');
+
+    // --- Groupement des cessions par grande famille fiscale ---
+    const groups = {
+        cto:    { label: 'Valeurs mobilières — CTO (Actions / ETF / Obligations)', rows: [] },
+        crypto: { label: 'Actifs numériques — Cryptomonnaies', rows: [] },
+        metals: { label: 'Métaux précieux, Jetons & Pièces à cours légal', rows: [] },
+        env:    { label: 'Enveloppes fiscales (PEA / PEA-PME / Assurance-Vie / PER)', rows: [] }
+    };
+    cessions.forEach(c => {
+        if (c.type === 'CRYPTO')                                          groups.crypto.rows.push(c);
+        else if (METAL_TYPES.includes(c.type))                            groups.metals.rows.push(c);
+        else if (c.type === 'ACTION_ETF' && c.envelope && c.envelope !== 'CTO') groups.env.rows.push(c);
+        else                                                              groups.cto.rows.push(c);
+    });
+
+    // --- Rendus ligne à ligne ---
+    const renderRows = (rows) => {
+        if (!rows.length) {
+            return `<tr><td colspan="7" style="text-align:center;color:#9ca3af;font-style:italic;padding:10px;">Aucune cession enregistrée dans cette catégorie.</td></tr>`;
+        }
+        return rows
+            .slice()
+            .sort((a, b) => new Date(b.dateVente) - new Date(a.dateVente))
+            .map(c => {
+                const line  = computeCessionLine(c);
+                const isPos = line.pvBrute >= 0;
+                const dateFR = c.dateVente ? new Date(c.dateVente).toLocaleDateString('fr-FR') : '—';
+                return `<tr>
+                    <td>${dateFR}</td>
+                    <td>${escapeHTML(c.name)}</td>
+                    <td class="pdf-num">${formatEUR(c.prixVente)}</td>
+                    <td class="pdf-num">${formatEUR(c.prixAchat)}</td>
+                    <td class="pdf-num" style="color:${isPos ? '#047857' : '#be123c'};font-weight:600;">${isPos ? '+' : ''}${formatEUR(line.pvBrute)}</td>
+                    <td style="font-size:9.5px;color:#4b5563;">${escapeHTML(line.abattementLabel)} · ${escapeHTML(line.detentionTag)}</td>
+                    <td class="pdf-num" style="color:#b45309;font-weight:600;">${formatEUR(line.taxLine)}</td>
+                </tr>`;
+            })
+            .join('');
+    };
+
+    const renderGroupTotal = (rows, label) => {
+        const pv  = rows.reduce((s, c) => s + Math.max(0, (c.prixVente || 0) - (c.prixAchat || 0) - (c.frais || 0)), 0);
+        const mv  = rows.reduce((s, c) => s + Math.min(0, (c.prixVente || 0) - (c.prixAchat || 0) - (c.frais || 0)), 0);
+        const t   = rows.reduce((s, c) => s + computeCessionLine(c).taxLine, 0);
+        return `<tr class="pdf-total-row">
+            <td colspan="4" style="text-align:right;">Sous-total — ${escapeHTML(label)}</td>
+            <td class="pdf-num">${formatEUR(pv + mv)}</td>
+            <td></td>
+            <td class="pdf-num">${formatEUR(t)}</td>
+        </tr>`;
+    };
+
+    // --- Page 1 : synthèse ---
+    let html = `<div class="pdf-page">
+        <div class="pdf-header">
+            <div style="display:flex;align-items:center;gap:12px;">
+                <div class="pdf-logo">📊</div>
+                <div>
+                    <h1>PatriMonial — Récapitulatif Fiscal</h1>
+                    <div style="font-size:11px;color:#4b5563;">Exercice ${exercise} · Déclaration des revenus ${exercise + 1}</div>
+                </div>
+            </div>
+            <div class="pdf-meta">
+                Édité le ${nowFR}<br>
+                Régime retenu : <b>${regimeLabel}</b>
+            </div>
+        </div>
+
+        <div class="pdf-kpi-grid">
+            <div class="pdf-kpi"><div class="label">Total cessions brutes</div><div class="value">${formatEUR(tax.totalBrutVentes)}</div></div>
+            <div class="pdf-kpi positive"><div class="label">Plus-values brutes</div><div class="value">${formatEUR(tax.plusValuesBrutes)}</div></div>
+            <div class="pdf-kpi negative"><div class="label">Moins-values brutes</div><div class="value">${formatEUR(tax.moinsValuesBrutes)}</div></div>
+            <div class="pdf-kpi accent"><div class="label">Impôt total estimé</div><div class="value">${formatEUR(tax.totalImpot)}</div></div>
+        </div>
+
+        <h2>1 · Synthèse du régime CTO (Titres &amp; Crypto)</h2>
+        <div class="pdf-kpi-grid">
+            <div class="pdf-kpi"><div class="label">Solde net imposable</div><div class="value">${formatEUR(tax.netForPFU)}</div></div>
+            <div class="pdf-kpi"><div class="label">PFU — IR 12,8 %</div><div class="value">${formatEUR(tax.pfuIR)}</div></div>
+            <div class="pdf-kpi"><div class="label">PFU — PS 17,2 %</div><div class="value">${formatEUR(tax.pfuPS)}</div></div>
+            <div class="pdf-kpi accent"><div class="label">Total PFU</div><div class="value">${formatEUR(tax.pfuTotal)}</div></div>
+        </div>
+        <div class="pdf-kpi-grid">
+            <div class="pdf-kpi"><div class="label">Barème — IR (TMI ${(taxTMI * 100).toFixed(0)} %)</div><div class="value">${formatEUR(tax.baremeIR)}</div></div>
+            <div class="pdf-kpi"><div class="label">Barème — PS 17,2 %</div><div class="value">${formatEUR(tax.baremePS)}</div></div>
+            <div class="pdf-kpi negative"><div class="label">Déduction CSG 6,8 %</div><div class="value">-${formatEUR(tax.csgDeductible)}</div></div>
+            <div class="pdf-kpi accent"><div class="label">Total Barème</div><div class="value">${formatEUR(tax.baremeTotal)}</div></div>
+        </div>
+        <div style="font-size:10px;color:#4b5563;margin-top:4px;">
+            Option retenue : <b>${regimeLabel}</b> · Impôt CTO : <b>${formatEUR(tax.selectedTotal)}</b>
+        </div>
+    </div>`;
+
+    // --- Page 2 : détail par catégorie ---
+    html += `<div class="pdf-page">
+        <div class="pdf-header" style="margin-bottom:12px;padding-bottom:8px;">
+            <div><h1 style="font-size:15px;">Détail des cessions par catégorie fiscale</h1></div>
+            <div class="pdf-meta">Exercice ${exercise}</div>
+        </div>`;
+
+    const sections = [
+        { idx: 2, data: groups.cto    },
+        { idx: 3, data: groups.crypto },
+        { idx: 4, data: groups.metals },
+        { idx: 5, data: groups.env    }
+    ];
+    sections.forEach(s => {
+        html += `<div class="pdf-section">
+            <h2>${s.idx} · ${s.data.label}</h2>
+            <table>
+                <thead><tr>
+                    <th>Date</th><th>Libellé</th>
+                    <th style="text-align:right;">Prix vente</th>
+                    <th style="text-align:right;">Prix achat</th>
+                    <th style="text-align:right;">Plus/moins-value</th>
+                    <th>Régime / abattement</th>
+                    <th style="text-align:right;">Impôt ligne</th>
+                </tr></thead>
+                <tbody>
+                    ${renderRows(s.data.rows)}
+                    ${s.data.rows.length ? renderGroupTotal(s.data.rows, s.data.label) : ''}
+                </tbody>
+            </table>
+        </div>`;
+    });
+
+    // --- Total général + pied de page ---
+    html += `<div class="pdf-section">
+        <h2>6 · Total général</h2>
+        <table>
+            <tbody>
+                <tr><td style="width:65%;">Impôt CTO / Crypto (régime sélectionné)</td><td class="pdf-num">${formatEUR(tax.selectedTotal)}</td></tr>
+                <tr><td>Impôt Métaux précieux / Jetons / Pièces à cours légal</td><td class="pdf-num">${formatEUR(tax.metalsTaxTotal)}</td></tr>
+                <tr><td>Impôt Enveloppes (PEA / AV / PER)</td><td class="pdf-num">${formatEUR(tax.enveloppesTaxTotal)}</td></tr>
+                <tr class="pdf-total-row"><td>Total impôt estimé pour l'exercice ${exercise}</td><td class="pdf-num">${formatEUR(tax.totalImpot)}</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="pdf-footer">
+        <b>Avertissement :</b> ce document est une estimation indicative produite automatiquement à partir des données saisies dans PatriMonial. Il ne remplace pas les cases précises de votre déclaration de revenus (2042, 2086, 2074…) ni l'avis d'un professionnel de la fiscalité — en particulier pour le PER, dont la fiscalité dépend fortement du mode de sortie et de la déductibilité des versements.
+        <br>Nombre de cessions prises en compte : <b>${cessions.length}</b> · Document généré le ${nowFR}.
+    </div>
+    </div>`;
+
+    container.innerHTML = html;
+
+    // Laisse le navigateur appliquer les styles avant d'ouvrir la boîte d'impression
+    setTimeout(() => window.print(), 150);
+}
+
+
+// =====================================================================
+// SIMULATEUR « ET SI JE VENDAIS ? » — calcul temps réel, 0 modification
+// ---------------------------------------------------------------------
+// La simulation se contente de construire une cession fictive (id=-1) et
+// de la passer à computeCessionLine() : on réutilise ainsi TOUTE la
+// logique fiscale (métaux, jetons, enveloppes PEA/AV/PER, PFU/Barème,
+// abattement durée) sans la dupliquer.
+// =====================================================================
+let _simulatorAssetId = null;
+
+function openSellSimulator(assetId) {
+    const asset = assets.find(a => a.id === assetId);
+    if (!asset) return;
+
+    _simulatorAssetId = assetId;
+
+    // En-tête
+    document.getElementById('sim-asset-name').innerText     = asset.name;
+    document.getElementById('sim-asset-ticker').innerText   = asset.ticker + (asset.envelope ? ' · ' + envelopeShort(asset.envelope) : '');
+    document.getElementById('sim-asset-held').innerText     = fmtQty(asset.qty) + ' u.';
+
+    const pru       = computePRUFromLots(asset) || (asset.qty > 0 ? asset.invested / asset.qty : 0);
+    const unitValue = asset.qty > 0 ? (asset.value / asset.qty) : 0;
+
+    document.getElementById('sim-asset-pru').innerText         = formatUnitPrice(pru);
+    document.getElementById('sim-asset-value-unit').innerText  = formatUnitPrice(unitValue);
+
+    // Inputs
+    const qtyInput = document.getElementById('sim-quantity');
+    qtyInput.max   = asset.qty;
+    qtyInput.value = asset.qty;
+    const slider = document.getElementById('sim-quantity-slider');
+    slider.max   = asset.qty;
+    slider.value = asset.qty;
+    document.getElementById('sim-unit-price').value = unitValue.toFixed(4);
+    document.getElementById('sim-sale-date').value  = new Date().toISOString().slice(0, 10);
+
+    document.getElementById('modal-simulate-sale').classList.remove('hidden');
+    recalcSimulation();
+}
+
+// Synchronisation slider ↔ champ numérique
+function onSimQuantityInput(source) {
+    const asset = assets.find(a => a.id === _simulatorAssetId);
+    if (!asset) return;
+    const max = asset.qty;
+    const slider = document.getElementById('sim-quantity-slider');
+    const number = document.getElementById('sim-quantity');
+
+    let v;
+    if (source === 'slider') {
+        v = parseFloat(slider.value) || 0;
+        number.value = v;
+    } else {
+        v = parseFloat(number.value) || 0;
+        v = Math.max(0, Math.min(v, max));
+        number.value = v;
+        slider.value = v;
+    }
+    recalcSimulation();
+}
+
+function simSetQuantityPct(pct) {
+    const asset = assets.find(a => a.id === _simulatorAssetId);
+    if (!asset) return;
+    const v = asset.qty * (pct / 100);
+    document.getElementById('sim-quantity').value = v;
+    document.getElementById('sim-quantity-slider').value = v;
+    recalcSimulation();
+}
+
+function recalcSimulation() {
+    const asset = assets.find(a => a.id === _simulatorAssetId);
+    if (!asset) return;
+
+    const qtyInput   = document.getElementById('sim-quantity');
+    const priceInput = document.getElementById('sim-unit-price');
+    const dateInput  = document.getElementById('sim-sale-date');
+
+    const qty       = Math.max(0, Math.min(parseFloat(qtyInput.value) || 0, asset.qty));
+    const unitPrice = parseFloat(priceInput.value) || 0;
+    const dateISO   = dateInput.value || new Date().toISOString().slice(0, 10);
+
+    // Rappel : delta vs valeur unitaire courante
+    const currentUnitValue = asset.qty > 0 ? (asset.value / asset.qty) : 0;
+    const deltaEl = document.getElementById('sim-price-delta');
+    if (currentUnitValue > 0 && unitPrice > 0) {
+        const d = ((unitPrice - currentUnitValue) / currentUnitValue) * 100;
+        const c = d >= 0 ? 'text-emerald-400' : 'text-rose-400';
+        deltaEl.className = 'text-[10px] mt-1 font-mono ' + c;
+        deltaEl.innerText = (d >= 0 ? '+' : '') + d.toFixed(2) + ' % vs cours actuel';
+    } else {
+        deltaEl.className = 'text-[10px] mt-1 font-mono text-gray-500';
+        deltaEl.innerText = '—';
+    }
+
+    // PRU fiscal (méthode officielle : lots restants uniquement)
+    const pru = computePRUFromLots(asset) || (asset.qty > 0 ? asset.invested / asset.qty : 0);
+
+    const totalSale = qty * unitPrice;
+    const totalCost = pru * qty;
+    const pnl       = totalSale - totalCost;
+
+    // --- Détermination du type fiscal, identique à prefillCessionFromAsset() ---
+    const security = isSecurityAsset(asset);
+    const cessionType = (!security && METAL_TYPES.includes(asset.taxCategory))
+        ? asset.taxCategory
+        : (hasTag(asset, 'Crypto') && !security ? 'CRYPTO' : 'ACTION_ETF');
+    const subType = hasTag(asset, 'Obligation') ? 'OBLIGATION'
+                  : hasTag(asset, 'ETF')        ? 'ETF'
+                  : 'ACTION';
+
+    // Date d'acquisition la plus ancienne connue (pour l'abattement durée)
+    const firstLot = (asset.lots || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+    const dateAchatISO = firstLot ? firstLot.date : (asset.purchaseDate || '');
+
+    // Cession fictive passée à computeCessionLine : réutilise 100 % de la fiscalité
+    const fakeCession = normalizeCession({
+        id: -1,
+        type: cessionType,
+        subType,
+        name: asset.name,
+        dateVente: dateISO,
+        dateAchat: dateAchatISO,
+        prixVente: totalSale,
+        prixAchat: totalCost,
+        frais: 0,
+        avant2018: false,
+        envelope: security ? (asset.envelope || 'CTO') : '',
+        envelopeOpenedAt: asset.envelopeOpenedAt || '',
+        zone: asset.zone || 'UE',
+        coupons: 0
+    });
+
+    const line = computeCessionLine(fakeCession);
+
+    // --- Rendu ---
+    document.getElementById('sim-result-total-sale').innerText = formatEUR(totalSale);
+    document.getElementById('sim-result-cost').innerText       = formatEUR(totalCost);
+
+    const pnlEl = document.getElementById('sim-result-pnl');
+    pnlEl.className = 'font-bold ' + (pnl >= 0 ? 'text-emerald-400' : 'text-rose-400');
+    pnlEl.innerText = (pnl >= 0 ? '+' : '') + formatEUR(pnl);
+
+    document.getElementById('sim-result-regime').innerText     = line.detentionTag || '—';
+    document.getElementById('sim-result-abattement').innerText = line.abattementLabel || '—';
+    document.getElementById('sim-result-tax').innerText        = formatEUR(line.taxLine);
+
+    const net = pnl - line.taxLine;
+    const netEl = document.getElementById('sim-result-net');
+    netEl.className = 'font-bold ' + (net >= 0 ? 'text-emerald-400' : 'text-rose-400');
+    netEl.innerText = (net >= 0 ? '+' : '') + formatEUR(net);
+
+    const netPct = totalSale > 0 ? (net / totalSale) * 100 : 0;
+    const netPctEl = document.getElementById('sim-result-net-pct');
+    netPctEl.className = 'font-mono ' + (net >= 0 ? 'text-emerald-400' : 'text-rose-400');
+    netPctEl.innerText = (netPct >= 0 ? '+' : '') + netPct.toFixed(2) + ' %';
+
+    // Avertissement (quantité nulle, partielle, ou dépasse)
+    const warn = document.getElementById('sim-warning');
+    const warns = [];
+    if (qty <= 0) warns.push('Quantité nulle : aucune vente simulée.');
+    if (qty > 0 && qty < asset.qty - 1e-9) warns.push(`Vente partielle : ${fmtQty(asset.qty - qty)} unité(s) resteront dans le portefeuille.`);
+    if (qty > asset.qty + 1e-9) warns.push('Quantité demandée supérieure à la position détenue.');
+    if (line.taxLine === 0 && pnl > 0) warns.push('Bonne nouvelle : aucune fiscalité estimée sur cette vente (franchise, abattement ou enveloppe exonérante).');
+    warn.innerHTML = warns.map(w => `<div><i class="fa-solid fa-circle-info mr-1"></i> ${escapeHTML(w)}</div>`).join('');
+    warn.classList.toggle('hidden', warns.length === 0);
+}
+
+// Ouvre le formulaire de cession pré-rempli avec les valeurs du simulateur.
+function simulateToCessionForm() {
+    const asset = assets.find(a => a.id === _simulatorAssetId);
+    if (!asset) { closeModal('modal-simulate-sale'); return; }
+
+    const qty       = parseFloat(document.getElementById('sim-quantity').value) || 0;
+    const unitPrice = parseFloat(document.getElementById('sim-unit-price').value) || 0;
+    const dateISO   = document.getElementById('sim-sale-date').value;
+
+    if (qty <= 0) { alert('Quantité nulle : rien à concrétiser.'); return; }
+
+    closeModal('modal-simulate-sale');
+    openAddCessionModal();
+
+    // Pré-remplissage via le flux normal du formulaire de cession
+    document.getElementById('cession-source-asset').value = asset.id;
+    prefillCessionFromAsset();
+
+    // Écrase ensuite avec les valeurs de la simulation
+    document.getElementById('cession-date-vente').value = dateISO;
+    document.getElementById('cession-qty').value        = qty;
+    document.getElementById('cession-prix-vente').value = (qty * unitPrice).toFixed(2);
+    // Le prix d'achat total sera recalculé côté handleAddCession (défensif)
+    updateCessionUnitPrices();
+    onCessionQtyChange();
 }

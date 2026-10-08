@@ -80,11 +80,69 @@ const defaultArbitrages = [
 ];
 
 // =====================================================================
+// MULTI-PORTEFEUILLE — registre, sélection, bascule
+// ---------------------------------------------------------------------
+// Les clés localStorage sont namespacées par un suffixe `__<id>`.
+// Le portefeuille par défaut conserve les clés historiques
+// (patriMonial_assets, patriMonial_cessions…), ce qui permet la
+// compatibilité ascendante : les données des utilisateurs existants
+// sont rattachées automatiquement au portefeuille « principal ».
+// =====================================================================
+const PORTFOLIO_DEFAULT = 'default';
+
+function _loadPortfolioRegistry() {
+    try {
+        const raw = localStorage.getItem('patriMonial_portfolios');
+        if (raw) {
+            const p = JSON.parse(raw);
+            if (Array.isArray(p) && p.length) return p;
+        }
+    } catch (_) {}
+    return [{ id: PORTFOLIO_DEFAULT, name: 'Portefeuille principal' }];
+}
+
+let portfolios = _loadPortfolioRegistry();
+let currentPortfolioId = (() => {
+    const saved = localStorage.getItem('patriMonial_currentPortfolio');
+    if (saved && portfolios.some(p => p.id === saved)) return saved;
+    return PORTFOLIO_DEFAULT;
+})();
+
+function savePortfolioRegistry() {
+    try { localStorage.setItem('patriMonial_portfolios', JSON.stringify(portfolios)); } catch (_) {}
+}
+function persistCurrentPortfolio() {
+    localStorage.setItem('patriMonial_currentPortfolio', currentPortfolioId);
+}
+
+// Renvoie la clé localStorage namespacée pour le portefeuille courant.
+function pfKey(base) {
+    return currentPortfolioId === PORTFOLIO_DEFAULT ? base : base + '__' + currentPortfolioId;
+}
+function currentPortfolio() {
+    return portfolios.find(p => p.id === currentPortfolioId) || portfolios[0];
+}
+
+// Lecteurs tolérants (null si la clé n'existe pas encore)
+function readPortfolioAssets() {
+    try { const r = localStorage.getItem(pfKey('patriMonial_assets')); return r ? JSON.parse(r) : null; } catch (_) { return null; }
+}
+function readPortfolioCessions() {
+    try { const r = localStorage.getItem(pfKey('patriMonial_cessions')); return r ? JSON.parse(r) : null; } catch (_) { return null; }
+}
+function readPortfolioArbitrages() {
+    try { const r = localStorage.getItem(pfKey('patriMonial_arbitrages')); return r ? JSON.parse(r) : null; } catch (_) { return null; }
+}
+function readPortfolioCadranNames() {
+    try { const r = localStorage.getItem(pfKey('patriMonial_cadranNames')); return r ? JSON.parse(r) : null; } catch (_) { return null; }
+}
+
+// =====================================================================
 // ÉTAT GLOBAL DE L'APPLICATION
 // =====================================================================
-let assets       = JSON.parse(localStorage.getItem('patriMonial_assets'))     || defaultAssets;
-let cessions     = JSON.parse(localStorage.getItem('patriMonial_cessions'))   || JSON.parse(JSON.stringify(defaultCessions));
-let arbitrages   = JSON.parse(localStorage.getItem('patriMonial_arbitrages')) || JSON.parse(JSON.stringify(defaultArbitrages));
+let assets       = readPortfolioAssets()     || defaultAssets;
+let cessions     = readPortfolioCessions()   || JSON.parse(JSON.stringify(defaultCessions));
+let arbitrages   = readPortfolioArbitrages() || JSON.parse(JSON.stringify(defaultArbitrages));
 let taxRegimeMode = localStorage.getItem('patriMonial_taxMode') || 'PFU';
 let taxTMI        = parseFloat(localStorage.getItem('patriMonial_tmi')) || 0.30;
 let cessionFilter = 'ALL';
@@ -100,10 +158,16 @@ let quadrantHistoryChartInstance  = null;
 let compareChartAllocInstance   = { A: null, B: null };
 let compareChartHistoryInstance = { A: null, B: null };
 
+// Paper Trading v2 — comparateur de scénarios (Étape C)
+let paperCompareState = { A: null, B: null };  // scenarioId sélectionnés
+let paperCompareChartAllocInstance   = { A: null, B: null };
+let paperCompareChartHistoryInstance = null;
+
 // État UI
 let currentQuadrantCode    = null;
 let currentAssetDetailId   = null;
 let dashboardRangeFilter   = 'ALL';
+let dashboardAllocView     = localStorage.getItem('patriMonial_allocView') || 'donut';
 let quadrantRangeFilter    = 'ALL';
 let assetDetailRangeFilter = 'ALL';
 let inventoryFilter        = 'ALL';
@@ -125,6 +189,75 @@ let realVolCache           = {};
 let realSeriesCache        = {};
 let finnhubApiKey          = localStorage.getItem('patriMonial_finnhubKey') || '';
 let twelveDataApiKey       = localStorage.getItem('patriMonial_twelveDataKey') || '';
+
+// Seuil de concentration (poids max d'un actif dans le portefeuille).
+// Au-delà : un badge ⚠ s'affiche sur la ligne / carte de l'actif.
+let concentrationThreshold = parseFloat(localStorage.getItem('patriMonial_concentrationThreshold'));
+if (!Number.isFinite(concentrationThreshold) || concentrationThreshold <= 0) concentrationThreshold = 0.25;
+
+// Teintage des lignes / cartes en fonction de la performance (actif)
+let tintRowsEnabled = localStorage.getItem('patriMonial_tintRows');
+tintRowsEnabled = (tintRowsEnabled === null) ? true : (tintRowsEnabled === 'true');
+
+// Thème clair (désactivé par défaut = mode sombre d'origine)
+let lightMode = localStorage.getItem('patriMonial_lightMode') === 'true';
+
+// Mode Paper Trading — nouveaux actifs marqués fictifs ; inclusion stats paramétrable
+let paperMode = localStorage.getItem('patriMonial_paperMode') === 'true';
+let paperIncludeInStats = localStorage.getItem('patriMonial_paperIncludeInStats') !== 'false';
+
+// =====================================================================
+// PAPER TRADING v2 — registre des scénarios (partagé entre portefeuilles)
+// =====================================================================
+const PAPER_SCENARIO_DEFAULT = 'default';
+const PAPER_SCENARIO_COLORS = ['#a855f7', '#06b6d4', '#f59e0b', '#ef4444', '#10b981', '#6366f1', '#ec4899', '#84cc16'];
+
+function _loadPaperScenarios() {
+    try {
+        const raw = localStorage.getItem('patriMonial_paperScenarios');
+        if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list) && list.length) return list;
+        }
+    } catch (_) {}
+    return [{
+        id: PAPER_SCENARIO_DEFAULT,
+        name: 'Scénario par défaut',
+        color: PAPER_SCENARIO_COLORS[0],
+        notes: '',
+        createdAt: Date.now()
+    }];
+}
+
+let paperScenarios = _loadPaperScenarios();
+let currentPaperScenarioId = (() => {
+    const saved = localStorage.getItem('patriMonial_currentPaperScenario');
+    if (saved && paperScenarios.some(s => s.id === saved)) return saved;
+    return paperScenarios[0].id;
+})();
+
+function savePaperScenarios() {
+    try { localStorage.setItem('patriMonial_paperScenarios', JSON.stringify(paperScenarios)); } catch (_) {}
+    localStorage.setItem('patriMonial_currentPaperScenario', currentPaperScenarioId);
+}
+
+function currentPaperScenario() {
+    return paperScenarios.find(s => s.id === currentPaperScenarioId) || paperScenarios[0];
+}
+
+function paperScenarioColor(scenarioId) {
+    const s = paperScenarios.find(x => x.id === scenarioId);
+    return s ? s.color : PAPER_SCENARIO_COLORS[0];
+}
+
+function paperScenarioName(scenarioId) {
+    const s = paperScenarios.find(x => x.id === scenarioId);
+    return s ? s.name : 'Scénario inconnu';
+}
+
+function paperAssetsOfScenario(scenarioId) {
+    return assets.filter(a => isPaperAsset(a) && (!scenarioId || a.paperScenarioId === scenarioId));
+}
 
 // =====================================================================
 // CONSTANTES MÉTIER
@@ -157,7 +290,7 @@ const LEGACY_ENVELOPE_MAP  = { ASSURANCE_VIE: 'AV' };
 
 const CADRAN_DEFAULT_NAMES = { OR: 'OR', MONNAIES: 'MONNAIES / DEVISES', ASIE: 'ACTIONS / ASIE', PETROLE: 'PÉTROLE / COMMODITIES' };
 const CADRAN_NUM = { OR: 1, MONNAIES: 2, ASIE: 3, PETROLE: 4 };
-let cadranNames = Object.assign({}, CADRAN_DEFAULT_NAMES, JSON.parse(localStorage.getItem('patriMonial_cadranNames') || '{}'));
+let cadranNames = Object.assign({}, CADRAN_DEFAULT_NAMES, readPortfolioCadranNames() || {});
 
 const CADRAN_BADGE_COLORS = {
     OR: 'bg-amber-950 text-amber-300 border-amber-800/50',
@@ -229,6 +362,329 @@ function debounce(fn, delay = 300) {
         clearTimeout(timer);
         timer = setTimeout(() => fn.apply(this, args), delay);
     };
+}
+
+// =====================================================================
+// COUNT-UP ANIMÉ — interpolation douce d'un nombre affiché (KPI)
+// ---------------------------------------------------------------------
+// Élément suivi via el.dataset.countupValue : à la 1ʳᵉ invocation, la
+// valeur de départ vaut 0 (page fraîchement chargée) ; ensuite, la
+// valeur précédente est reprise pour une transition continue.
+// Le formateur `format(v)` gère l'affichage (€, %, signe…).
+// =====================================================================
+const _prefersReducedMotion = window.matchMedia
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false;
+
+function countUp(el, target, format, opts = {}) {
+    if (!el) return;
+    if (!Number.isFinite(target)) { el.innerText = format(target); return; }
+
+    // Préférence OS : aucune animation
+    if (_prefersReducedMotion) {
+        el.innerText = format(target);
+        el.dataset.countupValue = String(target);
+        return;
+    }
+
+    const hasPrev = el.dataset.countupValue !== undefined;
+    const from = hasPrev ? parseFloat(el.dataset.countupValue) : 0;
+    el.dataset.countupValue = String(target);
+
+    // Variation négligeable : écriture directe (évite un micro-flash)
+    if (hasPrev && Math.abs(target - from) < 0.01) {
+        el.innerText = format(target);
+        return;
+    }
+
+    // Annule une éventuelle animation en cours sur cet élément
+    if (el._countUpRAF) { cancelAnimationFrame(el._countUpRAF); el._countUpRAF = null; }
+
+    // Durée : plus longue au 1er affichage (part de 0), plus courte sur les mises à jour
+    const duration = opts.duration ?? (hasPrev ? 400 : 700);
+    const start = performance.now();
+    const easeOut = t => 1 - Math.pow(1 - t, 3);
+
+    function tick(now) {
+        const t = Math.min(1, (now - start) / duration);
+        const v = from + (target - from) * easeOut(t);
+        el.innerText = format(v);
+        if (t < 1) {
+            el._countUpRAF = requestAnimationFrame(tick);
+        } else {
+            el.innerText = format(target);
+            el._countUpRAF = null;
+        }
+    }
+    el._countUpRAF = requestAnimationFrame(tick);
+}
+
+// Formateurs prêts à l'emploi pour les KPI du bandeau
+function fmtSignedEUR(v) { return (v >= 0 ? '+' : '') + formatEUR(v); }
+function fmtSignedPct(v) { return (v >= 0 ? '+' : '') + v.toFixed(2) + '%'; }
+
+// =====================================================================
+// TOOLTIPS CUSTOM — délégué d'événements global
+// ---------------------------------------------------------------------
+// Aucun code appelant à modifier : tout attribut `title="..."` posé
+// sur n'importe quel élément (y compris dynamiquement après un re-render)
+// devient automatiquement une infobulle stylée.
+// Les <title> SVG (treemap, heatmap) sont aussi pris en charge.
+// =====================================================================
+let _tooltipEl = null;
+let _tooltipShowTimer = null;
+let _tooltipCurrentTarget = null;
+
+function initCustomTooltips() {
+    if (_tooltipEl) return;
+    _tooltipEl = document.getElementById('custom-tooltip');
+    if (!_tooltipEl) {
+        _tooltipEl = document.createElement('div');
+        _tooltipEl.id = 'custom-tooltip';
+        _tooltipEl.className = 'custom-tooltip';
+        document.body.appendChild(_tooltipEl);
+    }
+
+    // Écoute en capture pour intercepter avant tout stopPropagation éventuel
+    document.addEventListener('mouseover',  _tooltipOnMouseOver,  true);
+    document.addEventListener('mouseout',   _tooltipOnMouseOut,   true);
+    document.addEventListener('focusin',    _tooltipOnFocusIn,    true);
+    document.addEventListener('focusout',   _tooltipHide,         true);
+    document.addEventListener('scroll',     _tooltipHide,         true);
+    document.addEventListener('click',      _tooltipHide,         true);
+    window.addEventListener('blur',         _tooltipHide);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') _tooltipHide(); }, true);
+}
+
+// Remonte la chaîne DOM jusqu'à un élément porteur d'un title= (ou d'un
+// <title> SVG enfant). Migre le title en dataset.tooltip pour neutraliser
+// définitivement le tooltip natif sur cet élément.
+function _findTooltipTarget(node) {
+    let current = node;
+    while (current && current !== document.body && current.nodeType === 1) {
+        if (current.dataset && current.dataset.tooltip) return current;
+
+        if (current.hasAttribute && current.hasAttribute('title')) {
+            const t = (current.getAttribute('title') || '').trim();
+            if (t) {
+                current.dataset.tooltip = t;
+                current.removeAttribute('title');
+                return current;
+            }
+        }
+        // Fallback SVG : <title> enfant direct
+        if (current.children && current.children.length) {
+            for (const child of current.children) {
+                if (child.tagName && child.tagName.toLowerCase() === 'title') {
+                    const txt = (child.textContent || '').trim();
+                    if (txt) {
+                        current.dataset.tooltip = txt;
+                        child.remove();
+                        return current;
+                    }
+                }
+            }
+        }
+        current = current.parentElement;
+    }
+    return null;
+}
+
+function _tooltipOnMouseOver(e) {
+    const target = _findTooltipTarget(e.target);
+    if (!target) return;
+    if (target === _tooltipCurrentTarget) return;
+
+    _tooltipHide();
+    _tooltipCurrentTarget = target;
+    _tooltipShowTimer = setTimeout(() => _tooltipShow(target), 300);
+}
+
+function _tooltipOnMouseOut(e) {
+    const t = _tooltipCurrentTarget;
+    if (!t) return;
+    const rel = e.relatedTarget;
+    if (rel && (t === rel || t.contains(rel))) return;
+    _tooltipHide();
+}
+
+function _tooltipOnFocusIn(e) {
+    const target = _findTooltipTarget(e.target);
+    if (!target) return;
+    _tooltipHide();
+    _tooltipCurrentTarget = target;
+    _tooltipShow(target);
+}
+
+function _tooltipShow(target) {
+    if (!_tooltipEl || !target.dataset || !target.dataset.tooltip) return;
+
+    const raw = target.dataset.tooltip;
+    const lines = raw.split(/\r?\n/);
+
+    // Reconstruit le contenu en <div> par ligne (sécurité : textContent)
+    _tooltipEl.innerHTML = '';
+    lines.forEach((line, i) => {
+        const d = document.createElement('div');
+        d.textContent = line;
+        if (i > 0) d.style.marginTop = '3px';
+        _tooltipEl.appendChild(d);
+    });
+    _tooltipEl.classList.toggle('multiline', lines.length > 1);
+
+    // Mesure hors-écran avant positionnement
+    _tooltipEl.style.visibility = 'hidden';
+    _tooltipEl.style.opacity = '0';
+    _tooltipEl.style.left = '-9999px';
+    _tooltipEl.style.top  = '-9999px';
+    _tooltipEl.classList.add('visible');
+
+    const rect   = target.getBoundingClientRect();
+    const ttRect = _tooltipEl.getBoundingClientRect();
+    const margin = 8;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+
+    // Préférence : au-dessus de l'élément, centré horizontalement
+    let placement = 'top';
+    let top  = rect.top - ttRect.height - margin;
+    let left = rect.left + rect.width / 2 - ttRect.width / 2;
+
+    if (top < margin) {
+        top = rect.bottom + margin;
+        placement = 'bottom';
+    }
+    // Clamp aux bords du viewport
+    left = Math.max(margin, Math.min(left, vw - ttRect.width - margin));
+    // Si le tooltip dépasse en bas, on le remonte pour rester visible
+    if (top + ttRect.height > vh - margin) {
+        top = Math.max(margin, vh - ttRect.height - margin);
+    }
+
+    _tooltipEl.style.left = left + 'px';
+    _tooltipEl.style.top  = top + 'px';
+    _tooltipEl.setAttribute('data-placement', placement);
+    _tooltipEl.setAttribute('aria-hidden', 'false');
+    _tooltipEl.style.visibility = '';
+    _tooltipEl.style.opacity = '';
+}
+
+function _tooltipHide() {
+    clearTimeout(_tooltipShowTimer);
+    _tooltipShowTimer = null;
+    _tooltipCurrentTarget = null;
+    if (_tooltipEl) {
+        _tooltipEl.classList.remove('visible');
+        _tooltipEl.setAttribute('aria-hidden', 'true');
+    }
+}
+
+// =====================================================================
+// SKELETON LOADING — affiche des lignes fantômes pendant une tâche async
+// ---------------------------------------------------------------------
+// withSkeleton(asyncFn, { rows, targetSelector, minMs }) :
+//   1. capture le contenu actuel de la zone cible,
+//   2. le remplace par N lignes shimmer,
+//   3. exécute asyncFn(),
+//   4. restaure le contenu réel OU le nouveau contenu rendu par la fonction.
+// minMs garantit un temps d'affichage minimum (évite le flash pour les
+// tâches trop rapides).
+// =====================================================================
+let _skeletonDepth = 0;
+
+function _skeletonRowsHTML(n, columns = 12) {
+    let html = '';
+    for (let i = 0; i < n; i++) {
+        const widths = ['w-24', 'w-16', 'w-24', 'w-8', 'w-12', 'w-12', 'w-8', 'w-16', 'w-16', 'w-16', 'w-12', 'w-12'];
+        let cells = '';
+        for (let c = 0; c < columns; c++) {
+            const w = widths[c % widths.length];
+            cells += `<td class="p-3"><span class="skeleton-block ${w}"></span></td>`;
+        }
+        html += `<tr class="skeleton-row">${cells}</tr>`;
+    }
+    return html;
+}
+
+function showSkeletonFor(selector, rows = 6, columns = 12) {
+    const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+    if (!el) return null;
+    const backup = el.innerHTML;
+    el.innerHTML = _skeletonRowsHTML(rows, columns);
+    return backup;
+}
+
+function restoreSkeletonFor(selector, backup) {
+    const el = typeof selector === 'string' ? document.querySelector(selector) : selector;
+    if (!el || backup === null) return;
+    el.innerHTML = backup;
+}
+
+async function withSkeleton(asyncFn, opts = {}) {
+    const selector = opts.selector || '#table-inventory-body';
+    const rows     = opts.rows     || 6;
+    const columns  = opts.columns  || 12;
+    const minMs    = opts.minMs    || 400;
+
+    // Un seul skeleton actif à la fois : si une tâche est déjà en cours,
+    // on n'en rajoute pas un second par-dessus.
+    if (_skeletonDepth > 0) {
+        return await asyncFn();
+    }
+    _skeletonDepth++;
+
+    const backup = showSkeletonFor(selector, rows, columns);
+    const t0 = performance.now();
+    let result;
+    try {
+        result = await asyncFn();
+    } finally {
+        const elapsed = performance.now() - t0;
+        const remaining = Math.max(0, minMs - elapsed);
+        if (remaining > 0) await new Promise(r => setTimeout(r, remaining));
+        // Si asyncFn a rendu l'UI (via refreshAllUI), on ne restaure PAS
+        // le backup — sinon on écraserait le rendu frais. On laisse les
+        // fonctions métier repeupler le tableau.
+        if (document.querySelector(selector) && document.querySelector(selector).querySelector('.skeleton-row')) {
+            restoreSkeletonFor(selector, backup);
+        }
+        _skeletonDepth--;
+    }
+    return result;
+}
+
+// =====================================================================
+// BANDEAU DE PROGRESSION DISCRET (opérations longues : API externes)
+// =====================================================================
+let _progressToastHideTimer = null;
+
+function showProgressToast(title, detail = '', pct = 0) {
+    const toast = document.getElementById('progress-toast');
+    if (!toast) return;
+    if (_progressToastHideTimer) { clearTimeout(_progressToastHideTimer); _progressToastHideTimer = null; }
+    const iconEl = document.getElementById('progress-toast-icon');
+    if (iconEl) iconEl.className = 'fa-solid fa-arrows-rotate fa-spin';
+    document.getElementById('progress-toast-title').innerText  = title;
+    document.getElementById('progress-toast-detail').innerText = detail || '—';
+    document.getElementById('progress-toast-bar').style.width  = Math.max(0, Math.min(100, pct)) + '%';
+    toast.classList.remove('hidden');
+}
+
+function updateProgressToast(detail, pct) {
+    const toast = document.getElementById('progress-toast');
+    if (!toast || toast.classList.contains('hidden')) return;
+    if (detail !== undefined) document.getElementById('progress-toast-detail').innerText = detail;
+    if (pct !== undefined)    document.getElementById('progress-toast-bar').style.width  = Math.max(0, Math.min(100, pct)) + '%';
+}
+
+function hideProgressToast(delay = 0) {
+    if (_progressToastHideTimer) clearTimeout(_progressToastHideTimer);
+    _progressToastHideTimer = setTimeout(() => {
+        const toast = document.getElementById('progress-toast');
+        if (toast) toast.classList.add('hidden');
+        const bar = document.getElementById('progress-toast-bar');
+        if (bar) bar.style.width = '0%';
+    }, delay);
 }
 function envelopeShort(code) {
     return code && ENVELOPPES[code] ? ENVELOPPES[code].short : '';
@@ -421,13 +877,13 @@ function normalizeCession(c) {
 // MIGRATION AU DÉMARRAGE (v1 -> v2)
 // =====================================================================
 function bootMigration() {
-    const storedVer = parseInt(localStorage.getItem('patriMonial_dataVersion') || '1', 10);
-    const hadData = localStorage.getItem('patriMonial_assets') !== null;
+    const storedVer = parseInt(localStorage.getItem(pfKey('patriMonial_dataVersion')) || '1', 10);
+    const hadData = localStorage.getItem(pfKey('patriMonial_assets')) !== null;
 
     if (hadData && storedVer < DATA_VERSION) {
         try {
             localStorage.setItem(
-                'patriMonial_backup_v' + storedVer + '_' + Date.now(),
+                pfKey('patriMonial_backup_v' + storedVer + '_' + Date.now()),
                 JSON.stringify({ assets, cessions, arbitrages })
             );
         } catch (err) {
@@ -441,10 +897,10 @@ function bootMigration() {
     if (storedVer < DATA_VERSION) {
         try {
             if (hadData) {
-                localStorage.setItem('patriMonial_assets', JSON.stringify(assets));
-                localStorage.setItem('patriMonial_cessions', JSON.stringify(cessions));
+                localStorage.setItem(pfKey('patriMonial_assets'), JSON.stringify(assets));
+                localStorage.setItem(pfKey('patriMonial_cessions'), JSON.stringify(cessions));
             }
-            localStorage.setItem('patriMonial_dataVersion', String(DATA_VERSION));
+            localStorage.setItem(pfKey('patriMonial_dataVersion'), String(DATA_VERSION));
         } catch (err) {
             console.warn('Écriture post-migration impossible :', err);
         }
@@ -474,21 +930,22 @@ function cadranSelectHTML(assetId, currentCadran) {
     }).join('');
     return `<select onchange="reassignAssetCadran(${assetId}, this.value)" class="bg-gray-950 border border-gray-800 rounded-md px-1.5 py-1 text-[10px] text-white focus:outline-none focus:border-indigo-500">${opts}</select>`;
 }
+
 // =====================================================================
 // PERSISTANCE (localStorage)
 // =====================================================================
 function saveToStorage() {
-    try { localStorage.setItem('patriMonial_assets', JSON.stringify(assets)); }
+    try { localStorage.setItem(pfKey('patriMonial_assets'), JSON.stringify(assets)); }
     catch (err) { console.warn('Sauvegarde actifs impossible (quota dépassé ?) :', err); }
 }
 
 function saveCessions() {
-    try { localStorage.setItem('patriMonial_cessions', JSON.stringify(cessions)); }
+    try { localStorage.setItem(pfKey('patriMonial_cessions'), JSON.stringify(cessions)); }
     catch (err) { console.warn('Sauvegarde cessions impossible :', err); }
 }
 
 function saveArbitrages() {
-    try { localStorage.setItem('patriMonial_arbitrages', JSON.stringify(arbitrages)); }
+    try { localStorage.setItem(pfKey('patriMonial_arbitrages'), JSON.stringify(arbitrages)); }
     catch (err) { console.warn('Sauvegarde arbitrages impossible :', err); }
 }
 
@@ -496,6 +953,552 @@ function saveTaxSettings() {
     localStorage.setItem('patriMonial_taxMode', taxRegimeMode);
     localStorage.setItem('patriMonial_tmi', String(taxTMI));
 }
+
+function saveConcentrationThreshold(pct) {
+    const v = parseFloat(pct);
+    if (!Number.isFinite(v) || v <= 0) return;
+    concentrationThreshold = Math.min(1, v / 100);
+    localStorage.setItem('patriMonial_concentrationThreshold', String(concentrationThreshold));
+    renderInventoryTable();
+    renderCryptoTable();
+    renderHorsGaveTable();
+    renderGaveDetailTable();
+}
+
+// Active/désactive le teintage performance des lignes et cartes.
+function setTintRowsEnabled(enabled) {
+    tintRowsEnabled = !!enabled;
+    localStorage.setItem('patriMonial_tintRows', String(tintRowsEnabled));
+    applyTintClassToBody();
+    // Rafraîchit toutes les tables pour faire apparaître / disparaître le teintage
+    renderInventoryTable();
+    renderCryptoTable();
+    renderHorsGaveTable();
+    renderGaveDetailTable();
+}
+
+function applyTintClassToBody() {
+    document.body.classList.toggle('tint-rows-enabled', !!tintRowsEnabled);
+}
+
+// =====================================================================
+// THÈME CLAIR — bascule + persistance
+// =====================================================================
+function applyLightModeClass() {
+    document.body.classList.toggle('light', !!lightMode);
+    updateThemeToggleUI();
+}
+
+function updateThemeToggleUI() {
+    const btn  = document.getElementById('theme-toggle-btn');
+    const icon = document.getElementById('theme-toggle-icon');
+    if (!btn || !icon) return;
+    if (lightMode) {
+        // En mode clair : on affiche une lune pour proposer de revenir au sombre
+        icon.className = 'fa-solid fa-moon';
+        btn.className = 'w-8 h-8 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 hover:text-white transition flex items-center justify-center flex-shrink-0';
+        btn.title = 'Passer en mode sombre';
+    } else {
+        // En mode sombre : on affiche un soleil
+        icon.className = 'fa-solid fa-sun';
+        btn.className = 'w-8 h-8 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 hover:text-white transition flex items-center justify-center flex-shrink-0';
+        btn.title = 'Passer en mode clair';
+    }
+}
+
+function setLightMode(enabled) {
+    lightMode = !!enabled;
+    localStorage.setItem('patriMonial_lightMode', String(lightMode));
+    applyLightModeClass();
+    // Re-rend les graphiques avec les bonnes couleurs de grille/libellés
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+}
+
+function toggleLightMode() {
+    setLightMode(!lightMode);
+}
+
+// =====================================================================
+// PAPER TRADING — positions fictives marquées `isPaper: true`
+// =====================================================================
+function isPaperAsset(a) { return !!(a && a.isPaper); }
+
+// Renvoie la liste des actifs à utiliser pour les agrégats / KPI.
+// Si `paperIncludeInStats` est faux, exclut les positions papier.
+function statsAssets() {
+    return paperIncludeInStats ? assets : assets.filter(a => !isPaperAsset(a));
+}
+
+// Cessions à utiliser pour la fiscalité : on exclut celles issues d'actifs papier
+// (elles ne correspondent à aucune réalité fiscale tant que non promues).
+function statsCessions() {
+    if (paperIncludeInStats) return cessions;
+    const realIds = new Set(assets.filter(a => !isPaperAsset(a)).map(a => a.id));
+    return cessions.filter(c => !c.fromPaper || realIds.has(c.fromPaper));
+}
+
+function countPaperAssets() {
+    return assets.filter(isPaperAsset).length;
+}
+
+function applyPaperModeClass() {
+    document.body.classList.toggle('paper-mode', !!paperMode);
+}
+
+function updatePaperToggleUI() {
+    const btn       = document.getElementById('paper-toggle-btn');
+    const icon      = document.getElementById('paper-toggle-icon');
+    const badge     = document.getElementById('paper-count-badge');
+    const banner    = document.getElementById('paper-mode-banner');
+    const includeCb = document.getElementById('paper-include-stats');
+    const labelEl   = document.getElementById('paper-toggle-label');
+    const scenLabel = document.getElementById('paper-current-scenario-label');
+
+    const scen = currentPaperScenario();
+    // Le badge compte uniquement les positions du scénario courant (pour rester cohérent avec le sélecteur)
+    const n = scen ? assets.filter(a => isPaperAsset(a) && a.paperScenarioId === scen.id).length : 0;
+
+    if (badge) {
+        badge.textContent = String(n);
+        badge.classList.toggle('hidden', n === 0);
+    }
+    if (labelEl) {
+        labelEl.textContent = paperMode && scen ? scen.name : 'Paper';
+        if (paperMode && scen) labelEl.style.color = scen.color;
+        else labelEl.style.color = '';
+    }
+    if (scenLabel && scen) {
+        scenLabel.textContent = scen.name;
+        scenLabel.style.color = scen.color;
+    }
+    if (icon) {
+        icon.className = paperMode
+            ? 'fa-solid fa-flask text-[11px]'
+            : 'fa-solid fa-flask text-[11px] opacity-50';
+        if (paperMode && scen) icon.style.color = scen.color;
+        else icon.style.color = '';
+    }
+    if (btn) {
+        btn.className = paperMode
+            ? 'px-3 py-1.5 rounded-lg bg-purple-950/60 border border-purple-700/50 text-xs text-purple-200 hover:bg-purple-900/70 transition flex items-center gap-1.5 flex-shrink-0 max-w-[240px]'
+            : 'px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-700 text-xs text-gray-400 hover:text-white transition flex items-center gap-1.5 flex-shrink-0 max-w-[240px]';
+        btn.title = paperMode
+            ? `Mode Paper Trading ACTIF — scénario : ${scen ? scen.name : '—'}`
+            : 'Activer le mode Paper Trading (positions fictives)';
+    }
+    if (banner) banner.classList.toggle('hidden', !paperMode);
+    if (includeCb) includeCb.checked = paperIncludeInStats;
+
+    // Menu scénarios : mise à jour si visible
+    if (typeof renderPaperScenarioMenu === 'function') renderPaperScenarioMenu();
+}
+
+function setPaperMode(enabled) {
+    paperMode = !!enabled;
+    localStorage.setItem('patriMonial_paperMode', String(paperMode));
+    applyPaperModeClass();
+    updatePaperToggleUI();
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+}
+
+function togglePaperMode() {
+    setPaperMode(!paperMode);
+}
+
+function setPaperIncludeInStats(enabled) {
+    paperIncludeInStats = !!enabled;
+    localStorage.setItem('patriMonial_paperIncludeInStats', String(paperIncludeInStats));
+    updatePaperToggleUI();
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+}
+
+// --- CRUD scénarios -----------------------------------------------------
+function setCurrentPaperScenario(scenarioId) {
+    if (!paperScenarios.some(s => s.id === scenarioId)) return;
+    currentPaperScenarioId = scenarioId;
+    savePaperScenarios();
+    updatePaperToggleUI();
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+}
+
+function createPaperScenario(name) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return null;
+    const id = 'ps_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    const usedColors = new Set(paperScenarios.map(s => s.color));
+    const color = PAPER_SCENARIO_COLORS.find(c => !usedColors.has(c))
+        || PAPER_SCENARIO_COLORS[paperScenarios.length % PAPER_SCENARIO_COLORS.length];
+    paperScenarios.push({ id, name: trimmed, color, notes: '', createdAt: Date.now() });
+    savePaperScenarios();
+    return id;
+}
+
+function renamePaperScenario(id, newName) {
+    const s = paperScenarios.find(x => x.id === id);
+    if (!s) return;
+    const trimmed = (newName || '').trim();
+    if (!trimmed) return;
+    s.name = trimmed;
+    savePaperScenarios();
+    updatePaperToggleUI();
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+}
+
+function deletePaperScenario(id) {
+    if (paperScenarios.length <= 1) {
+        alert('Impossible de supprimer le dernier scénario.');
+        return;
+    }
+    const s = paperScenarios.find(x => x.id === id);
+    if (!s) return;
+    const victims = assets.filter(a => isPaperAsset(a) && a.paperScenarioId === id);
+    const msg = `Supprimer le scénario "${s.name}" ?\n\n` +
+        (victims.length ? `${victims.length} position(s) papier rattachée(s) à ce scénario seront AUSSI supprimées.\n\n` : '') +
+        `Cette action est irréversible (Ctrl+Z pour annuler).`;
+    if (!confirm(msg)) return;
+
+    pushUndo('Suppression du scénario : ' + s.name);
+    const victimIds = new Set(victims.map(v => v.id));
+    assets = assets.filter(a => !victimIds.has(a.id));
+    paperScenarios = paperScenarios.filter(x => x.id !== id);
+    if (currentPaperScenarioId === id) currentPaperScenarioId = paperScenarios[0].id;
+    savePaperScenarios();
+    saveToStorage();
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+    if (typeof renderPaperScenarioMenu === 'function') renderPaperScenarioMenu();
+}
+
+// Archive/désarchive un scénario : il garde ses positions et ses stats mais
+// n'apparaît plus dans le menu principal (sauf case "Afficher les archivés").
+function archivePaperScenario(id, archived = true) {
+    const s = paperScenarios.find(x => x.id === id);
+    if (!s) return;
+    s.archived = !!archived;
+    s.archivedAt = archived ? Date.now() : null;
+    savePaperScenarios();
+    updatePaperToggleUI();
+    if (typeof renderStrategiesTab === 'function') renderStrategiesTab();
+}
+
+function toggleArchivePaperScenario(id) {
+    const s = paperScenarios.find(x => x.id === id);
+    if (!s) return;
+    const victims = assets.filter(a => isPaperAsset(a) && a.paperScenarioId === id);
+    const verb = s.archived ? 'Désarchiver' : 'Archiver';
+    if (!confirm(`${verb} le scénario "${s.name}" ?\n\n` +
+        (s.archived
+            ? 'Il redeviendra visible dans le menu des scénarios actifs.'
+            : `Il restera conservé avec ses ${victims.length} position(s) mais n'apparaîtra plus dans le menu principal.`)
+    )) return;
+    archivePaperScenario(id, !s.archived);
+}
+
+function activePaperScenarios() {
+    return paperScenarios.filter(s => !s.archived);
+}
+function archivedPaperScenarios() {
+    return paperScenarios.filter(s => s.archived);
+}
+
+// Duplique un scénario (positions + paramètres) dans un nouveau scénario.
+// Le nouveau scénario devient le scénario courant après duplication.
+function duplicatePaperScenario(id) {
+    const s = paperScenarios.find(x => x.id === id);
+    if (!s) return;
+    const defaultName = s.name + ' (copie)';
+    const newName = prompt('Nom du nouveau scénario dupliqué :', defaultName);
+    if (!newName || !newName.trim()) return;
+
+    pushUndo('Duplication du scénario : ' + s.name);
+
+    const newId = createPaperScenario(newName);
+    if (!newId) return;
+
+    // Clone les positions papier rattachées au scénario source
+    const srcAssets = assets.filter(a => isPaperAsset(a) && a.paperScenarioId === id);
+    const clones = srcAssets.map(a => {
+        const c = JSON.parse(JSON.stringify(a));
+        c.id = Date.now() + Math.floor(Math.random() * 100000);
+        c.paperScenarioId = newId;
+        // Nouveaux IDs de lots pour éviter les collisions
+        if (Array.isArray(c.lots)) {
+            c.lots.forEach(l => { l.id = Date.now() + Math.floor(Math.random() * 100000); });
+        }
+        return c;
+    });
+    assets.push(...clones);
+    saveToStorage();
+    setCurrentPaperScenario(newId);
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+    if (typeof renderStrategiesTab === 'function') renderStrategiesTab();
+    alert(`Scénario dupliqué : ${clones.length} position(s) copiée(s) dans "${newName}".`);
+}
+
+// Agrège les valeurs d'un scénario jour par jour (pour la sparkline 60j).
+// Renvoie un tableau { date, value } trié par date, en réutilisant l'historique
+// de chaque actif du scénario.
+function buildPaperScenarioSeries(scenarioId, days = 60) {
+    // ... (code existant inchangé)
+    const list = assets.filter(a => isPaperAsset(a) && a.paperScenarioId === scenarioId);
+    if (!list.length) return [];
+    const cutoff = Date.now() - days * 864e5;
+
+    const allPoints = [];
+    list.forEach(a => {
+        (a.history || []).forEach(h => {
+            const d = parseFlexDate(h.date);
+            if (d && Number.isFinite(h.value)) allPoints.push({ date: d, id: a.id, value: h.value });
+        });
+        allPoints.push({ date: new Date(), id: a.id, value: a.value || 0 });
+    });
+    if (!allPoints.length) return [];
+    allPoints.sort((x, y) => x.date - y.date);
+
+    const start = new Date(Math.max(cutoff, allPoints[0].date.getTime()));
+    const today = new Date();
+    const lastValues = {};
+    const series = [];
+    const cursor = new Date(start);
+    while (cursor <= today) {
+        const endOfDay = new Date(cursor); endOfDay.setHours(23, 59, 59, 999);
+        for (const p of allPoints) {
+            if (p.date <= endOfDay) lastValues[p.id] = p.value;
+        }
+        const total = Object.values(lastValues).reduce((s, v) => s + v, 0);
+        series.push({ date: new Date(cursor).getTime(), value: total });
+        cursor.setDate(cursor.getDate() + 1);
+    }
+    return series;
+}
+
+// ---------------------------------------------------------------------
+// PAPER TRADING v2 — Helpers pour le comparateur (Étape C)
+// ---------------------------------------------------------------------
+// Renvoie un objet de synthèse pour un scénario donné :
+//  { invested, value, pnl, pnlPct, positions, sharpe, vol, maxDD, meanAnnualized, scenario }
+function summarizePaperScenario(scenarioId) {
+    const s = paperScenarios.find(x => x.id === scenarioId);
+    if (!s) return null;
+    const list = assets.filter(a => isPaperAsset(a) && a.paperScenarioId === scenarioId);
+    const invested = list.reduce((sum, a) => sum + (a.invested || 0), 0);
+    const value    = list.reduce((sum, a) => sum + (a.value    || 0), 0);
+    const pnl      = value - invested;
+    const pnlPct   = invested > 0 ? (pnl / invested * 100) : 0;
+
+    let rm = null;
+    if (list.length >= 2) {
+        try { rm = computeRiskMetricsFromAssets(list); } catch (_) { rm = null; }
+    }
+    return {
+        scenario: s,
+        list,
+        positions: list.length,
+        invested,
+        value,
+        pnl,
+        pnlPct,
+        sharpe:       rm && Number.isFinite(rm.sharpe)      ? rm.sharpe      : null,
+        vol:          rm && Number.isFinite(rm.volatility)  ? rm.volatility  : null,
+        maxDD:        rm && Number.isFinite(rm.maxdrawdown) ? rm.maxdrawdown : null,
+        meanAnnual:   rm && Number.isFinite(rm.meanAnnualized) ? rm.meanAnnualized : null,
+        usedRealData: rm ? !!rm.usedRealReturns : false
+    };
+}
+
+// Delta formaté pour la table de comparaison
+function paperDelta(a, b, format = 'eur', lowerIsBetter = false) {
+    if (a === null || b === null || !Number.isFinite(a) || !Number.isFinite(b)) {
+        return { txt: '—', cls: 'text-gray-600' };
+    }
+    const d = a - b;
+    let txt, isWinA;
+    if (format === 'eur') {
+        txt = (d >= 0 ? '+' : '') + formatEUR(d);
+        isWinA = d >= 0;
+    } else if (format === 'pct') {
+        txt = (d >= 0 ? '+' : '') + d.toFixed(2) + ' pts';
+        isWinA = d >= 0;
+    } else if (format === 'ratio') {
+        txt = (d >= 0 ? '+' : '') + d.toFixed(2);
+        isWinA = d >= 0;
+    } else if (format === 'count') {
+        txt = (d >= 0 ? '+' : '') + d;
+        isWinA = d >= 0;
+    }
+    if (lowerIsBetter) isWinA = !isWinA;
+    return { txt, cls: isWinA ? 'text-emerald-400' : 'text-rose-400' };
+}
+}
+
+// --- UI scénarios : menu déroulant attaché au bouton Paper -------------
+function renderPaperScenarioMenu() {
+    const list = document.getElementById('paper-scenario-list');
+    if (!list) return;
+    list.innerHTML = paperScenarios.map(s => {
+        const isCurrent = s.id === currentPaperScenarioId;
+        const count = assets.filter(a => isPaperAsset(a) && a.paperScenarioId === s.id).length;
+        return `<div class="flex items-center justify-between border-b border-gray-800/60 last:border-b-0 ${isCurrent ? 'bg-purple-950/30' : ''}">
+            <button onclick="setCurrentPaperScenario('${s.id}'); closePaperScenarioMenu();" class="flex-1 text-left min-w-0 flex items-center gap-2 p-2.5 hover:bg-gray-800/50 transition">
+                <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${s.color};"></span>
+                <span class="min-w-0 flex-1">
+                    <span class="block text-xs font-medium ${isCurrent ? 'text-white' : 'text-gray-300'} truncate">${escapeHTML(s.name)}</span>
+                    <span class="block text-[10px] text-gray-500 font-mono">${count} position(s) · créé le ${new Date(s.createdAt).toLocaleDateString('fr-FR')}</span>
+                </span>
+                ${isCurrent ? '<i class="fa-solid fa-circle-check text-purple-400 text-[10px]"></i>' : ''}
+            </button>
+            <div class="flex gap-0.5 flex-shrink-0 pr-1.5">
+                <button onclick="event.stopPropagation(); renamePaperScenarioUI('${s.id}')" class="p-1.5 text-gray-500 hover:text-purple-400 transition" title="Renommer"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                ${paperScenarios.length > 1 ? `<button onclick="event.stopPropagation(); deletePaperScenario('${s.id}')" class="p-1.5 text-gray-500 hover:text-rose-400 transition" title="Supprimer"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function renamePaperScenarioUI(id) {
+    const s = paperScenarios.find(x => x.id === id);
+    if (!s) return;
+    const name = prompt('Nouveau nom du scénario :', s.name);
+    if (!name || !name.trim() || name.trim() === s.name) return;
+    renamePaperScenario(id, name);
+    renderPaperScenarioMenu();
+}
+
+function togglePaperScenarioMenu(evt) {
+    if (evt) evt.stopPropagation();
+    const menu = document.getElementById('paper-scenario-menu');
+    if (!menu) return;
+    if (menu.classList.contains('hidden')) {
+        renderPaperScenarioMenu();
+        menu.classList.remove('hidden');
+    } else {
+        menu.classList.add('hidden');
+    }
+}
+
+function closePaperScenarioMenu() {
+    const menu = document.getElementById('paper-scenario-menu');
+    if (menu) menu.classList.add('hidden');
+}
+
+function createPaperScenarioUI() {
+    const name = prompt('Nom du nouveau scénario (ex : DCA BTC 2025, Rotation Asie…) :', 'Nouveau scénario');
+    if (!name || !name.trim()) return;
+    const id = createPaperScenario(name);
+    if (!id) return;
+    setCurrentPaperScenario(id);
+    if (typeof renderPaperScenarioMenu === 'function') renderPaperScenarioMenu();
+    // Active automatiquement le mode papier si pas déjà actif
+    if (!paperMode) togglePaperMode();
+}
+
+// Promotion d'une position papier en position réelle (retire le flag isPaper)
+function promotePaperAsset(id) {
+    const a = assets.find(x => x.id === id);
+    if (!a || !isPaperAsset(a)) return;
+    const scenName = paperScenarioName(a.paperScenarioId);
+    if (!confirm(`Promouvoir "${a.name}" (scénario « ${scenName} ») du mode papier au portefeuille réel ?\n\nLa position sortira du mode fictif et sera incluse dans tous les calculs fiscaux (impôt, plus-values latentes, ratios de risque).`)) return;
+    delete a.isPaper;
+    delete a.paperScenarioId;
+    saveToStorage();
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+}
+
+// Purge des positions papier.
+//   - sans argument : toutes les positions papier
+//   - avec scenarioId : seulement celles du scénario ciblé
+function deleteAllPaperAssets(scenarioId) {
+    const target = scenarioId || null;
+    const victims = assets.filter(a => isPaperAsset(a) && (!target || a.paperScenarioId === target));
+    if (!victims.length) {
+        alert('Aucune position papier à supprimer dans cette sélection.');
+        return;
+    }
+    const label = target ? `du scénario « ${paperScenarioName(target)} »` : 'de tous les scénarios';
+    if (!confirm(`Supprimer définitivement les ${victims.length} position(s) papier ${label} ?\n\nCette action est irréversible (mais vous pouvez Ctrl+Z juste après).`)) return;
+    pushUndo('Purge des positions papier');
+    const victimIds = new Set(victims.map(v => v.id));
+    assets = assets.filter(a => !victimIds.has(a.id));
+    saveToStorage();
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+}
+
+// Renvoie la classe CSS de teintage pour un actif ('' si neutre ou désactivé)
+function rowTintClass(asset) {
+    if (!tintRowsEnabled) return '';
+    const v = (asset.value || 0) - (asset.invested || 0);
+    if (v > 0.01)  return 'row-profit';
+    if (v < -0.01) return 'row-loss';
+    return '';
+}
+
+// Idem pour les cartes mobiles (classes distinctes)
+function cardTintClass(asset) {
+    if (!tintRowsEnabled) return '';
+    const v = (asset.value || 0) - (asset.invested || 0);
+    if (v > 0.01)  return 'card-profit';
+    if (v < -0.01) return 'card-loss';
+    return '';
+}
+
+// =====================================================================
+// UNDO — pile bornée à 10 états, capture complète avant chaque action
+// destructive. Restauration par Ctrl+Z ou via performUndo().
+// =====================================================================
+const UNDO_MAX = 10;
+let undoStack = [];
+let _undoToastTimer = null;
+
+function pushUndo(label) {
+    try {
+        undoStack.push({
+            label: label || 'Action',
+            at: Date.now(),
+            assets:       JSON.parse(JSON.stringify(assets)),
+            cessions:     JSON.parse(JSON.stringify(cessions)),
+            arbitrages:   JSON.parse(JSON.stringify(arbitrages)),
+            cadranNames:  JSON.parse(JSON.stringify(cadranNames))
+        });
+        while (undoStack.length > UNDO_MAX) undoStack.shift();
+    } catch (err) {
+        // Deep copy d'un très gros portefeuille peut être lente : on log mais
+        // on ne bloque jamais l'action utilisateur pour un souci d'undo.
+        console.warn('pushUndo a échoué (portefeuille trop volumineux ?) :', err);
+    }
+}
+
+function performUndo() {
+    if (!undoStack.length) {
+        showUndoToast('Aucune action à annuler', true);
+        return;
+    }
+    const snap = undoStack.pop();
+    assets      = snap.assets;
+    cessions    = snap.cessions;
+    arbitrages  = snap.arbitrages;
+    cadranNames = snap.cadranNames;
+    localStorage.setItem('patriMonial_cadranNames', JSON.stringify(cadranNames));
+    saveToStorage();
+    saveCessions();
+    saveArbitrages();
+    refreshAllUI();
+    showUndoToast(`Annulé : ${snap.label}`);
+}
+
+function showUndoToast(msg, isWarning) {
+    const toast = document.getElementById('undo-toast');
+    const text  = document.getElementById('undo-toast-text');
+    const icon  = document.getElementById('undo-toast-icon');
+    if (!toast || !text) return;
+    if (_undoToastTimer) { clearTimeout(_undoToastTimer); _undoToastTimer = null; }
+    text.innerText = msg;
+    if (icon) icon.className = isWarning
+        ? 'fa-solid fa-circle-info text-amber-400'
+        : 'fa-solid fa-rotate-left text-teal-400';
+    toast.classList.remove('hidden');
+    _undoToastTimer = setTimeout(() => toast.classList.add('hidden'), isWarning ? 1800 : 3200);
+}
+
+function undoCount() { return undoStack.length; }
 
 // =====================================================================
 // TIMELINE PORTEFEUILLE (utilisée par tous les graphiques)
@@ -707,8 +1710,6 @@ function syncAssetFromLots(asset) {
     }
 }
 
-
-
 // =====================================================================
 // UPSERT POINT D'HISTORIQUE DU JOUR
 // =====================================================================
@@ -725,14 +1726,14 @@ function upsertTodayHistoryPoint(asset, value, invested) {
 // SAUVEGARDE / RESTAURATION / IMPORT / EXPORT
 // =====================================================================
 function createSnapshot(label) {
-    const backups = JSON.parse(localStorage.getItem('patriMonial_localBackups') || '[]');
+    const backups = JSON.parse(localStorage.getItem(pfKey('patriMonial_localBackups')) || '[]');
     backups.push({
         label: label || new Date().toLocaleString('fr-FR'),
         at: Date.now(),
         data: currentDataSnapshot()
     });
     while (backups.length > 7) backups.shift();
-    try { localStorage.setItem('patriMonial_localBackups', JSON.stringify(backups)); }
+    try { localStorage.setItem(pfKey('patriMonial_localBackups'), JSON.stringify(backups)); }
     catch (err) { console.warn('Sauvegarde locale impossible (quota ?) :', err); }
 }
 
@@ -745,16 +1746,16 @@ function currentDataSnapshot() {
 }
 
 function checkDailyAutoBackup() {
-    const last = localStorage.getItem('patriMonial_lastAutoBackup');
+    const last = localStorage.getItem(pfKey('patriMonial_lastAutoBackup'));
     const todayStr = new Date().toDateString();
     if (last !== todayStr) {
         createSnapshot('Auto — ' + todayStr);
-        localStorage.setItem('patriMonial_lastAutoBackup', todayStr);
+        localStorage.setItem(pfKey('patriMonial_lastAutoBackup'), todayStr);
     }
 }
 
 function listLocalBackups() {
-    return JSON.parse(localStorage.getItem('patriMonial_localBackups') || '[]');
+    return JSON.parse(localStorage.getItem(pfKey('patriMonial_localBackups')) || '[]');
 }
 
 // Export complet : actifs + cessions + arbitrages + noms de cadrans + préférences fiscales
@@ -840,7 +1841,7 @@ function handleImportJSON(e) {
 
             // Persistance
             saveToStorage(); saveCessions(); saveArbitrages(); saveTaxSettings();
-            localStorage.setItem('patriMonial_cadranNames', JSON.stringify(cadranNames));
+            localStorage.setItem(pfKey('patriMonial_cadranNames'), JSON.stringify(cadranNames));
 
             refreshAllUI();
             alert(`Import réussi :\n• ${assets.length} actif(s)\n• ${cessions.length} cession(s)\n• ${arbitrages.length} arbitrage(s)`);

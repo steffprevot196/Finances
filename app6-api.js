@@ -158,6 +158,10 @@ async function refreshRealPriceHistory() {
     if (icon) icon.classList.add('fa-spin');
     if (btn) btn.disabled = true;
 
+    // Skeleton immédiat sur l'inventaire + la table crypto (feedback visuel)
+    showSkeletonFor('#table-inventory-body', 6, 13);
+    showSkeletonFor('#table-crypto-body', 3, 7);
+
     let done = 0;
     const failed = [];
 
@@ -185,33 +189,63 @@ async function refreshRealPriceHistory() {
         } catch (err) { failed.push(ticker + ' (' + err.message + ')'); }
     }
 
-    // --- Actions / ETF via Twelve Data (fallback Yahoo si non configuré) ---
-    const equityAssets = assets.filter(a =>
-        (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto')
-    );
-    for (const a of equityAssets) {
-        const symbol = a.yahooTicker || a.ticker;
-        if (!symbol) continue;
-        const key = 'EQUITY_' + symbol.toUpperCase();
-        try {
-            let series;
-            if (twelveDataApiKey) {
-                series = await fetchTwelveDataHistory(symbol);
-            } else {
-                series = await fetchYahooHistory(symbol);
+        // --- Actions / ETF via Twelve Data (fallback Yahoo si non configuré) ---
+        const equityAssets = assets.filter(a =>
+            (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto')
+        );
+    
+        const showToast = equityAssets.length > 1;
+        if (showToast) {
+            showProgressToast(
+                'Téléchargement de l\'historique…',
+                `0 / ${equityAssets.length} · démarrage`,
+                0
+            );
+        }
+    
+        let processed = 0;
+        for (const a of equityAssets) {
+            processed++;
+            const symbol = a.yahooTicker || a.ticker;
+            if (!symbol) continue;
+            const key = 'EQUITY_' + symbol.toUpperCase();
+    
+            if (showToast) {
+                updateProgressToast(
+                    `${processed} / ${equityAssets.length} · ${symbol}`,
+                    (processed - 1) / equityAssets.length * 100
+                );
             }
-            if (series.length < 30) {
-                failed.push(`${symbol} (données insuffisantes : ${series.length} points)`);
-                continue;
+    
+            try {
+                let series;
+                if (twelveDataApiKey) {
+                    series = await fetchTwelveDataHistory(symbol);
+                } else {
+                    series = await fetchYahooHistory(symbol);
+                }
+                if (series.length < 30) {
+                    failed.push(`${symbol} (données insuffisantes : ${series.length} points)`);
+                    continue;
+                }
+                await priceDBSet(key, { updatedAt: Date.now(), series });
+                done++;
+            } catch (err) { failed.push(`${symbol} (${err.message})`); }
+    
+            if (processed < equityAssets.length) {
+                if (showToast) {
+                    updateProgressToast(
+                        `${processed} / ${equityAssets.length} · pause API (8 s)…`,
+                        processed / equityAssets.length * 100
+                    );
+                }
+                await new Promise(r => setTimeout(r, twelveDataApiKey ? 8000 : 200));
             }
-            await priceDBSet(key, { updatedAt: Date.now(), series });
-            done++;
-        } catch (err) { failed.push(`${symbol} (${err.message})`); }
-        await new Promise(r => setTimeout(r, twelveDataApiKey ? 8000 : 200));
-    }
-
-    if (icon) icon.classList.remove('fa-spin');
-    if (btn) btn.disabled = false;
+        }
+    
+        if (icon) icon.classList.remove('fa-spin');
+        if (btn) btn.disabled = false;
+        hideProgressToast(400);
 
     if (done === 0 && failed.length === 0) {
         alert('Aucun actif éligible trouvé (Crypto, Devises, ou Actions/ETF avec ticker).');
@@ -223,7 +257,8 @@ async function refreshRealPriceHistory() {
 
     // B5 : recharge le cache mémoire des volatilités réelles puis redessine.
     // primeRealVolCache() appelle lui-même renderInventoryTable() et
-    // calculateRiskMetrics() en fin de traitement.
+    // calculateRiskMetrics() en fin de traitement — le skeleton est alors
+    // écrasé par le rendu réel de renderInventoryTable().
     await primeRealVolCache();
 }
 
@@ -258,13 +293,20 @@ function primeRealVolCache() {
             if (sym) keys.push(['EQUITY_' + sym, sym]);
         }
     });
-    return Promise.all(keys.map(([k]) => priceDBGet(k).catch(() => null))).then(results => {
+        return Promise.all(keys.map(([k]) => priceDBGet(k).catch(() => null))).then(results => {
+        let anyNewSeries = false;
         results.forEach((r, i) => {
             if (r && Array.isArray(r.series) && r.series.length >= 30) {
                 realVolCache[keys[i][1]]    = annualizedVolFromSeries(r.series);
                 realSeriesCache[keys[i][1]] = r.series;
+                anyNewSeries = true;
             }
         });
+        // Invalide le cache sparkline : de nouvelles séries réelles viennent
+        // d'être chargées, les mini-courbes doivent se rafraîchir.
+        if (anyNewSeries && typeof _sparklineCache !== 'undefined' && _sparklineCache.clear) {
+            _sparklineCache.clear();
+        }
         if (typeof renderInventoryTable === 'function') renderInventoryTable();
         if (typeof calculateRiskMetrics === 'function') calculateRiskMetrics();
     });
@@ -278,6 +320,10 @@ async function fetchLivePrices() {
     const icon = document.getElementById('icon-refresh-prices');
     if (icon) icon.classList.add('fa-spin');
     if (btn)  btn.disabled = true;
+
+    // Skeleton immédiat sur les 2 tables principales pendant les fetch
+    const invBackup = showSkeletonFor('#table-inventory-body', 6, 13);
+    const cryptoBackup = showSkeletonFor('#table-crypto-body', 3, 7);
 
     const cryptoMap = CRYPTO_COINGECKO_IDS;
     const currencyTickers = ['USD', 'JPY', 'CHF', 'GBP'];
@@ -337,19 +383,51 @@ async function fetchLivePrices() {
     const stockAssets = assets.filter(a => (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto'));
     if (stockAssets.length) {
         let stockUpdated = 0;
+
+        // Bandeau de progression — affiché uniquement si Twelve Data est configuré
+        // (c'est le seul cas où la boucle dure vraiment longtemps : 8 s / actif).
+        const showToast = twelveDataApiKey && stockAssets.length > 1;
+        if (showToast) {
+            showProgressToast(
+                'Actualisation des ETF / Actions…',
+                `0 / ${stockAssets.length} · démarrage`,
+                0
+            );
+        }
+
+        let processed = 0;
         for (const a of stockAssets) {
+            processed++;
             const symbol = a.yahooTicker || a.ticker;
             if (!symbol) continue;
             let price = null;
             const sources = [];
+
+            if (showToast) {
+                updateProgressToast(
+                    `${processed} / ${stockAssets.length} · ${symbol}`,
+                    (processed - 1) / stockAssets.length * 100
+                );
+            }
 
             // 1) Twelve Data (source principale, toutes places)
             if (twelveDataApiKey) {
                 try {
                     price = await fetchTwelveDataQuote(symbol);
                     if (price) sources.push('Twelve Data');
-                    // 8 requêtes/min en gratuit → 7,5 s minimum entre appels
-                    await new Promise(r => setTimeout(r, 8000));
+                    // 8 requêtes/min en gratuit → 7,5 s minimum entre appels.
+                    // On saute la pause après le DERNIER actif (aucun appel après).
+                    if (processed < stockAssets.length) {
+                        // Fait avancer la barre pendant l'attente, en interpolant
+                        // vers la prochaine position (feedback visuel).
+                        if (showToast) {
+                            updateProgressToast(
+                                `${processed} / ${stockAssets.length} · pause API (8 s)…`,
+                                processed / stockAssets.length * 100
+                            );
+                        }
+                        await new Promise(r => setTimeout(r, 8000));
+                    }
                 } catch (err) {
                     sources.push(`Twelve Data: ${err.message}`);
                 }
@@ -399,6 +477,10 @@ async function fetchLivePrices() {
     if (icon) icon.classList.remove('fa-spin');
     if (btn)  btn.disabled = false;
 
+    // Ferme le bandeau une fois tout terminé (léger délai pour laisser
+    // voir la barre à 100 % avant qu'il disparaisse).
+    hideProgressToast(400);
+
     // --- Alertes : APRÈS tous les fetch, une seule fois ---
     if (sourceErrors.length > 0) {
         const failedFetch = sourceErrors.some(e => /failed to fetch/i.test(e));
@@ -408,6 +490,15 @@ async function fetchLivePrices() {
                 : ''));
     } else if (updated > 0) {
         alert(`Cours actualisés automatiquement pour ${updated} actif(s) (crypto, devises, actions/ETF, or).`);
+    }
+
+    // --- Restauration explicite du contenu (si refreshAllUI() n'a pas déjà
+    // repeuplé le tableau — cas où updated === 0). ---
+    if (document.querySelector('#table-inventory-body')?.querySelector('.skeleton-row')) {
+        restoreSkeletonFor('#table-inventory-body', invBackup);
+    }
+    if (document.querySelector('#table-crypto-body')?.querySelector('.skeleton-row')) {
+        restoreSkeletonFor('#table-crypto-body', cryptoBackup);
     }
 
     // --- Mise à jour manuelle groupée pour tout le reste ---
@@ -490,11 +581,26 @@ function refreshAllUI() {
 
     if (activeTab === 'tab-dashboard') initDashboardCharts();
     else if (activeTab === 'tab-gave') initGaveDonutChart();
+    else if (activeTab === 'tab-strategies' && typeof renderStrategiesTab === 'function') renderStrategiesTab();
+    else if (activeTab === 'tab-objectifs' && typeof renderGoalsTab === 'function') renderGoalsTab();
 
     if (compareActive) {
         if (compareSegmentA) renderComparePanel('A');
         if (compareSegmentB) renderComparePanel('B');
     }
+
+    // Maintient le compteur/badge/label du bouton Paper en cohérence
+    // (utile après un switch de portefeuille ou une promotion en réel).
+    if (typeof updatePaperToggleUI === 'function') updatePaperToggleUI();
+
+    // Évaluation des alertes personnalisées (Chantier F)
+    if (typeof evaluateAlerts === 'function') evaluateAlerts();
+
+    // Recalcul du TRI (Chantier G) — invalidate cache + KPI global
+    if (typeof refreshTIR === 'function') refreshTIR();
+
+    // Recalcul du scoring des actifs (Chantier H) — leaderboard + cache
+    if (typeof refreshScoring === 'function') refreshScoring();
 }
 
 // =====================================================================
@@ -578,7 +684,7 @@ function deleteLocalBackup(index) {
     if (!confirm(`Supprimer la sauvegarde "${b.label}" ? Cette action est irréversible.`)) return;
     backups.splice(index, 1);
     try {
-        localStorage.setItem('patriMonial_localBackups', JSON.stringify(backups));
+        localStorage.setItem(pfKey('patriMonial_localBackups'), JSON.stringify(backups));
     } catch (err) {
         alert('Suppression impossible : ' + err.message);
         return;
@@ -901,7 +1007,7 @@ async function pullFromDrive(fileId) {
         arbitrages = payload.arbitrages;
         if (payload.cadranNames) {
             cadranNames = payload.cadranNames;
-            localStorage.setItem('patriMonial_cadranNames', JSON.stringify(cadranNames));
+            localStorage.setItem(pfKey('patriMonial_cadranNames'), JSON.stringify(cadranNames));
         }
         assets.forEach(normalizeAsset);
         cessions.forEach(normalizeCession);
@@ -926,7 +1032,7 @@ function restoreLocalBackup(index) {
     arbitrages = b.data.arbitrages;
     if (b.data.cadranNames) {
         cadranNames = b.data.cadranNames;
-        localStorage.setItem('patriMonial_cadranNames', JSON.stringify(cadranNames));
+        localStorage.setItem(pfKey('patriMonial_cadranNames'), JSON.stringify(cadranNames));
     }
     assets.forEach(normalizeAsset);
     cessions.forEach(normalizeCession);
