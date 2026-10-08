@@ -115,6 +115,11 @@ let compareSegmentB        = '';
 let compareRangeA          = 'ALL';
 let compareRangeB          = 'ALL';
 let pendingSellDate        = '';
+
+// État du tableau des lots (persiste entre les ouvertures du modal détail)
+let lotSortKey    = 'date';   // 'date' | 'qty' | 'qtyRemaining' | 'price' | 'cumPRU' | 'pnl' | 'frais'
+let lotSortDir    = 'asc';    // 'asc' | 'desc'
+let lotShowSold   = true;     // afficher les lots totalement vendus ?
 let lastRiskMetrics        = {};
 let realVolCache           = {};
 let realSeriesCache        = {};

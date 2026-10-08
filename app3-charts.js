@@ -224,72 +224,192 @@ function openAssetDetailModal(id) {
 //   - Val. actuelle : valeur unitaire de marché actuelle (identique sur chaque ligne)
 //   - P&L latent  : (valeur actuelle − prix lot) × qty restante
 //                   → réponse directe à "ce lot est-il en PV ou en MV ?"
-function renderAssetLotsTable(asset) {
-    const tbody = document.getElementById('modal-asset-lots-body');
-    if (!tbody) return;
-    const lots = (asset.lots || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+// =====================================================================
+// TABLEAU DES LOTS — enrichissement, tri, filtre, badges, export CSV
+// =====================================================================
 
-    if (!lots.length) {
-        tbody.innerHTML = '<tr><td colspan="10" class="p-3 text-center text-gray-500 text-xs">Aucun lot enregistré.</td></tr>';
-        return;
-    }
-
-    // Valeur unitaire de marché actuelle (valeur totale / quantité totale restante)
-    const totalQtyRemaining = lots.reduce((s, l) => s + (l.qtyRemaining || 0), 0);
+// Prépare les données enrichies d'un actif pour l'affichage et l'export.
+// Retourne { lots, currentUnitValue, bestLotId, worstLotId }.
+function _enrichLotsForAsset(asset) {
+    const allLots = (asset.lots || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+    const totalQtyRemaining = allLots.reduce((s, l) => s + (l.qtyRemaining || 0), 0);
     const currentUnitValue  = totalQtyRemaining > 0 ? (asset.value / totalQtyRemaining) : 0;
 
-    // Accumulateurs pour le PRU cumulé et le P&L total
-    let cumQty  = 0;
-    let cumCost = 0;
-    let totalPnl = 0;
-    let totalPnlBase = 0;
-
-    const rowsHTML = lots.map(l => {
+    let cumQty = 0, cumCost = 0;
+    const lots = allLots.map((l, idx) => {
         const lotUnitCost = (l.price || 0) + ((l.frais || 0) / (l.qty || 1));
         cumQty  += (l.qty || 0);
         cumCost += (l.qty || 0) * (l.price || 0) + (l.frais || 0);
         const cumPRU = cumQty > 0 ? cumCost / cumQty : 0;
 
-        const remaining = l.qtyRemaining || 0;
-        const isSold = remaining <= 0;
+        // PRU cumulé AVANT ce lot (pour afficher la flèche ↑/↓)
+        const previousPRU = (idx > 0 && cumQty > (l.qty || 0))
+            ? (cumCost - ((l.qty || 0) * (l.price || 0) + (l.frais || 0))) / (cumQty - (l.qty || 0))
+            : null;
 
-        // P&L latent sur les unités encore détenues
+        const remaining  = l.qtyRemaining || 0;
+        const isSold     = remaining <= 0;
         const pnlPerUnit = (currentUnitValue > 0 && !isSold) ? (currentUnitValue - lotUnitCost) : 0;
         const pnlTotal   = pnlPerUnit * remaining;
         const pnlPct     = lotUnitCost > 0 ? (pnlPerUnit / lotUnitCost) * 100 : 0;
-        const isPos      = pnlTotal >= 0;
 
-        if (!isSold && currentUnitValue > 0) {
-            totalPnl += pnlTotal;
-            totalPnlBase += lotUnitCost * remaining;
+        return {
+            ...l,
+            _lotUnitCost: lotUnitCost,
+            _cumPRU: cumPRU,
+            _previousPRU: previousPRU,
+            _remaining: remaining,
+            _isSold: isSold,
+            _pnlTotal: pnlTotal,
+            _pnlPct: pnlPct
+        };
+    });
+
+    // Identification meilleur / pire lot (uniquement parmi les lots actifs, et
+    // seulement si on a au moins 2 lots à comparer).
+    const activeLots = lots.filter(l => !l._isSold && currentUnitValue > 0);
+    let bestLotId = null, worstLotId = null;
+    if (activeLots.length >= 2) {
+        const sortedByPnl = [...activeLots].sort((a, b) => b._pnlPct - a._pnlPct);
+        bestLotId  = sortedByPnl[0].id;
+        worstLotId = sortedByPnl[sortedByPnl.length - 1].id;
+    }
+
+    return { lots, currentUnitValue, bestLotId, worstLotId };
+}
+
+// Trie un tableau de lots enrichis selon la clé et la direction courantes
+function _sortLotsArray(lots, key, dir) {
+    const mult = dir === 'asc' ? 1 : -1;
+    const getVal = (l) => {
+        switch (key) {
+            case 'date':         return l.date ? new Date(l.date).getTime() : 0;
+            case 'qty':          return l.qty || 0;
+            case 'qtyRemaining': return l._remaining;
+            case 'price':        return l._lotUnitCost;
+            case 'cumPRU':       return l._cumPRU;
+            case 'pnl':          return l._pnlTotal;
+            case 'frais':        return l.frais || 0;
+            default:             return 0;
+        }
+    };
+    return [...lots].sort((a, b) => (getVal(a) - getVal(b)) * mult);
+}
+
+// Met à jour les icônes de tri dans l'en-tête
+function updateLotSortIndicators() {
+    const keys = ['date', 'qty', 'qtyRemaining', 'price', 'cumPRU', 'pnl', 'frais'];
+    keys.forEach(k => {
+        const icon = document.getElementById('lots-sort-icon-' + k);
+        if (!icon) return;
+        icon.className = 'fa-solid text-[9px]';
+        if (lotSortKey === k) {
+            icon.classList.add(lotSortDir === 'asc' ? 'fa-sort-up' : 'fa-sort-down', 'text-amber-400');
+        } else {
+            icon.classList.add('fa-sort', 'opacity-30');
+        }
+    });
+}
+
+// Appelé au clic sur une colonne triable
+function sortLots(key) {
+    if (lotSortKey === key) {
+        lotSortDir = lotSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+        lotSortKey = key;
+        // Par défaut : asc sur la date (chronologique), desc sur les autres
+        // (le plus gros / récent / rentable d'abord)
+        lotSortDir = key === 'date' ? 'asc' : 'desc';
+    }
+    if (currentAssetDetailId) {
+        const asset = assets.find(a => a.id === currentAssetDetailId);
+        if (asset) renderAssetLotsTable(asset);
+    }
+}
+
+// Appelé au toggle du filtre "Afficher les lots vendus"
+function toggleLotsSoldVisibility(show) {
+    lotShowSold = !!show;
+    if (currentAssetDetailId) {
+        const asset = assets.find(a => a.id === currentAssetDetailId);
+        if (asset) renderAssetLotsTable(asset);
+    }
+}
+
+// Affiche le tableau des lots dans le modal de détail de l'actif
+function renderAssetLotsTable(asset) {
+    const tbody = document.getElementById('modal-asset-lots-body');
+    if (!tbody) return;
+
+    // Synchronise la checkbox du filtre avec l'état global (utile à la 1ʳᵉ ouverture)
+    const soldToggle = document.getElementById('lots-show-sold-toggle');
+    if (soldToggle) soldToggle.checked = lotShowSold;
+
+    const enriched = _enrichLotsForAsset(asset);
+
+    if (!enriched.lots.length) {
+        tbody.innerHTML = '<tr><td colspan="10" class="p-3 text-center text-gray-500 text-xs">Aucun lot enregistré.</td></tr>';
+        updateLotSortIndicators();
+        return;
+    }
+
+    // Filtre les lots vendus si demandé
+    let visible = lotShowSold
+        ? enriched.lots
+        : enriched.lots.filter(l => !l._isSold);
+
+    if (!visible.length) {
+        tbody.innerHTML = '<tr><td colspan="10" class="p-3 text-center text-gray-500 text-xs">Tous les lots sont vendus (cochez « Afficher les lots vendus » pour les voir).</td></tr>';
+        updateLotSortIndicators();
+        return;
+    }
+
+    // Tri selon l'état courant
+    visible = _sortLotsArray(visible, lotSortKey, lotSortDir);
+
+    // Rendu des lignes
+    let totalPnl = 0, totalPnlBase = 0;
+
+    const rowsHTML = visible.map(l => {
+        const isPos = l._pnlTotal >= 0;
+        const sold  = l._isSold;
+        const noMarket = enriched.currentUnitValue <= 0;
+
+        // Accumulateurs P&L total (sur les lots actifs visibles uniquement)
+        if (!sold && !noMarket) {
+            totalPnl += l._pnlTotal;
+            totalPnlBase += l._lotUnitCost * l._remaining;
         }
 
-        // Marqueur visuel : ce lot fait-il monter (↑) ou baisser (↓) le PRU cumulé ?
-        // Comparaison avec le PRU du lot précédent (avant ce lot) — utile seulement à partir du 2e lot.
-        const previousPRU = cumQty > (l.qty || 0)
-            ? (cumCost - ((l.qty || 0) * (l.price || 0) + (l.frais || 0))) / (cumQty - (l.qty || 0))
-            : null;
-        const pruArrow = previousPRU === null
+        // Flèche ↑/↓ sur le PRU cumulé
+        const pruArrow = l._previousPRU === null
             ? ''
-            : (cumPRU > previousPRU + 1e-9
+            : (l._cumPRU > l._previousPRU + 1e-9
                 ? ' <i class="fa-solid fa-arrow-up text-[8px] text-rose-400/70" title="Ce lot a fait monter votre PRU"></i>'
-                : cumPRU < previousPRU - 1e-9
+                : l._cumPRU < l._previousPRU - 1e-9
                     ? ' <i class="fa-solid fa-arrow-down text-[8px] text-emerald-400/70" title="Ce lot a fait baisser votre PRU"></i>'
                     : '');
 
-        return `<tr class="${isSold ? 'opacity-40' : ''}">
-            <td class="p-2.5 whitespace-nowrap">${l.date ? new Date(l.date).toLocaleDateString('fr-FR') : '—'}</td>
+        // Badge 👑 meilleur lot / 📉 pire lot
+        const badge = l.id === enriched.bestLotId
+            ? ' <i class="fa-solid fa-crown text-[10px] text-amber-400" title="Meilleur lot (P&L % le plus élevé)"></i>'
+            : l.id === enriched.worstLotId
+                ? ' <i class="fa-solid fa-arrow-trend-down text-[10px] text-rose-400" title="Lot le moins performant"></i>'
+                : '';
+
+        return `<tr class="${sold ? 'opacity-40' : ''}">
+            <td class="p-2.5 whitespace-nowrap">${l.date ? new Date(l.date).toLocaleDateString('fr-FR') : '—'}${badge}</td>
             <td class="p-2.5 text-gray-400 truncate max-w-[110px]" title="${escapeHTML(l.reference || '')}">${escapeHTML(l.reference) || '—'}</td>
             <td class="p-2.5 text-right">${l.qty}</td>
-            <td class="p-2.5 text-right ${remaining > 0 ? 'text-emerald-400 font-bold' : 'text-gray-500'}">${remaining}</td>
-            <td class="p-2.5 text-right text-gray-400">${formatUnitPrice(lotUnitCost)}</td>
-            <td class="p-2.5 text-right text-blue-300">${formatUnitPrice(cumPRU)}${pruArrow}</td>
-            <td class="p-2.5 text-right text-gray-300">${currentUnitValue > 0 ? formatUnitPrice(currentUnitValue) : '—'}</td>
-            <td class="p-2.5 text-right ${isSold ? 'text-gray-500' : (isPos ? 'text-emerald-400' : 'text-rose-400')}">
-                ${isSold || currentUnitValue <= 0
+            <td class="p-2.5 text-right ${l._remaining > 0 ? 'text-emerald-400 font-bold' : 'text-gray-500'}">${l._remaining}</td>
+            <td class="p-2.5 text-right text-gray-400">${formatUnitPrice(l._lotUnitCost)}</td>
+            <td class="p-2.5 text-right text-blue-300">${formatUnitPrice(l._cumPRU)}${pruArrow}</td>
+            <td class="p-2.5 text-right text-gray-300">${noMarket ? '—' : formatUnitPrice(enriched.currentUnitValue)}</td>
+            <td class="p-2.5 text-right ${sold || noMarket ? 'text-gray-500' : (isPos ? 'text-emerald-400' : 'text-rose-400')}">
+                ${sold || noMarket
                     ? '—'
-                    : `<div class="font-bold">${isPos ? '+' : ''}${formatEUR(pnlTotal)}</div>
-                       <div class="text-[10px] ${isPos ? 'text-emerald-400/70' : 'text-rose-400/70'}">${isPos ? '+' : ''}${pnlPct.toFixed(2)}%</div>`}
+                    : `<div class="font-bold">${isPos ? '+' : ''}${formatEUR(l._pnlTotal)}</div>
+                       <div class="text-[10px] ${isPos ? 'text-emerald-400/70' : 'text-rose-400/70'}">${isPos ? '+' : ''}${l._pnlPct.toFixed(2)}%</div>`}
             </td>
             <td class="p-2.5 text-right text-gray-500">${formatEUR(l.frais || 0)}</td>
             <td class="p-2.5 text-center whitespace-nowrap">
@@ -299,9 +419,9 @@ function renderAssetLotsTable(asset) {
         </tr>`;
     }).join('');
 
-    // Ligne de synthèse : P&L latent total sur les lots actifs
+    // Ligne de synthèse P&L global (lots actifs uniquement)
     const totalPnlClass = totalPnl >= 0 ? 'text-emerald-400' : 'text-rose-400';
-    const totalPnlPct = totalPnlBase > 0 ? (totalPnl / totalPnlBase * 100) : 0;
+    const totalPnlPct   = totalPnlBase > 0 ? (totalPnl / totalPnlBase * 100) : 0;
     const summaryRow = totalPnlBase > 0
         ? `<tr class="bg-gray-950/80 border-t-2 border-gray-700 font-bold">
                <td colspan="7" class="p-2.5 text-right text-gray-400">Total P&amp;L latent sur les lots actifs :</td>
@@ -314,6 +434,90 @@ function renderAssetLotsTable(asset) {
         : '';
 
     tbody.innerHTML = rowsHTML + summaryRow;
+    updateLotSortIndicators();
+}
+
+// =====================================================================
+// EXPORT CSV DU TABLEAU DES LOTS
+// Format : séparateur ';' (Excel FR), décimales ',', BOM UTF-8 pour les accents.
+// =====================================================================
+function exportLotsCSV(assetId) {
+    const asset = assets.find(a => a.id === assetId);
+    if (!asset) return;
+
+    const enriched = _enrichLotsForAsset(asset);
+    if (!enriched.lots.length) {
+        alert('Aucun lot à exporter.');
+        return;
+    }
+
+    const fmtNum  = (v, d = 2) => Number.isFinite(v) ? v.toFixed(d).replace('.', ',') : '';
+    const csvCell = (s) => {
+        const str = String(s == null ? '' : s);
+        return /[";\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+
+    const rows = [];
+
+    // Ligne de titre
+    rows.push([
+        csvCell('Détail des lots'),
+        csvCell(asset.name),
+        csvCell('Ticker: ' + (asset.ticker || '')),
+        csvCell('Exporté le ' + new Date().toLocaleString('fr-FR'))
+    ].join(';'));
+
+    // En-tête
+    rows.push([
+        'Date', 'Référence', 'Qté achetée', 'Qté restante',
+        'Prix lot', 'PRU cumulé', 'Valeur actuelle', 'P&L latent (€)', 'P&L (%)', 'Frais (€)'
+    ].join(';'));
+
+    // Lignes
+    let totalPnl = 0, totalPnlBase = 0;
+    // On exporte toujours dans l'ordre chronologique (indépendant du tri visuel)
+    enriched.lots.forEach(l => {
+        const hasMarket = enriched.currentUnitValue > 0 && !l._isSold;
+        rows.push([
+            csvCell(l.date ? new Date(l.date).toLocaleDateString('fr-FR') : ''),
+            csvCell(l.reference || ''),
+            fmtNum(l.qty, 8),
+            fmtNum(l._remaining, 8),
+            fmtNum(l._lotUnitCost, 4),
+            fmtNum(l._cumPRU, 4),
+            fmtNum(enriched.currentUnitValue, 4),
+            hasMarket ? fmtNum(l._pnlTotal, 2) : '',
+            hasMarket ? fmtNum(l._pnlPct, 2) : '',
+            fmtNum(l.frais || 0, 2)
+        ].join(';'));
+
+        if (hasMarket) {
+            totalPnl += l._pnlTotal;
+            totalPnlBase += l._lotUnitCost * l._remaining;
+        }
+    });
+
+    // Ligne de synthèse
+    const totalPnlPct = totalPnlBase > 0 ? (totalPnl / totalPnlBase * 100) : 0;
+    rows.push([
+        csvCell('Total P&L latent'), '', '', '', '', '', '',
+        fmtNum(totalPnl, 2),
+        fmtNum(totalPnlPct, 2),
+        ''
+    ].join(';'));
+
+    // Génère et télécharge le fichier
+    const csv  = '\uFEFF' + rows.join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url;
+    const safeTicker = (asset.ticker || 'actif').replace(/[^A-Z0-9_-]/gi, '_');
+    a.download = `lots_${safeTicker}_${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 }
 
 // ---------------------------------------------------------------------

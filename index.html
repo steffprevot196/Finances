@@ -1432,23 +1432,34 @@
 
                 <!-- DÉTAIL DES LOTS (achats successifs) -->
                 <div>
-                    <div class="text-xs font-bold text-gray-300 uppercase mb-2 flex items-center gap-2">
-                        <i class="fa-solid fa-layer-group text-blue-400"></i>
-                        Détail des achats successifs (lots)
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-2">
+                        <div class="text-xs font-bold text-gray-300 uppercase flex items-center gap-2">
+                            <i class="fa-solid fa-layer-group text-blue-400"></i>
+                            Détail des achats successifs (lots)
+                        </div>
+                        <div class="flex items-center gap-2 text-[11px]">
+                            <label class="flex items-center gap-1.5 text-gray-400 cursor-pointer select-none" title="Afficher aussi les lots totalement vendus (grisés)">
+                                <input type="checkbox" id="lots-show-sold-toggle" onchange="toggleLotsSoldVisibility(this.checked)" class="accent-indigo-500" checked>
+                                Afficher les lots vendus
+                            </label>
+                            <button type="button" onclick="exportLotsCSV(currentAssetDetailId)" class="px-2 py-1 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] flex items-center gap-1" title="Exporter ce tableau en CSV (format Excel FR)">
+                                <i class="fa-solid fa-file-csv"></i> CSV
+                            </button>
+                        </div>
                     </div>
                     <div class="overflow-x-auto rounded-xl border border-gray-800">
                         <table class="w-full text-left text-xs text-gray-300">
                             <thead class="bg-gray-950 text-gray-400 uppercase font-medium">
                                 <tr>
-                                    <th class="p-2.5">Date</th>
+                                    <th class="p-2.5 cursor-pointer hover:text-white select-none" onclick="sortLots('date')">Date <i id="lots-sort-icon-date" class="fa-solid fa-sort text-[9px] opacity-30"></i></th>
                                     <th class="p-2.5" title="Référence / N° de série du lot">Réf.</th>
-                                    <th class="p-2.5 text-right" title="Quantité achetée dans ce lot">Qté ach.</th>
-                                    <th class="p-2.5 text-right" title="Quantité encore détenue dans ce lot">Qté rest.</th>
-                                    <th class="p-2.5 text-right" title="Prix d'achat unitaire de ce lot (frais inclus)">Prix lot</th>
-                                    <th class="p-2.5 text-right text-blue-300" title="Prix de Revient Unitaire moyen pondéré de tous les lots jusqu'à celui-ci inclus — permet de visualiser si ce lot a fait monter ou baisser votre PRU global">PRU cumulé</th>
+                                    <th class="p-2.5 text-right cursor-pointer hover:text-white select-none" onclick="sortLots('qty')" title="Quantité achetée dans ce lot">Qté ach. <i id="lots-sort-icon-qty" class="fa-solid fa-sort text-[9px] opacity-30"></i></th>
+                                    <th class="p-2.5 text-right cursor-pointer hover:text-white select-none" onclick="sortLots('qtyRemaining')" title="Quantité encore détenue dans ce lot">Qté rest. <i id="lots-sort-icon-qtyRemaining" class="fa-solid fa-sort text-[9px] opacity-30"></i></th>
+                                    <th class="p-2.5 text-right cursor-pointer hover:text-white select-none" onclick="sortLots('price')" title="Prix d'achat unitaire de ce lot (frais inclus)">Prix lot <i id="lots-sort-icon-price" class="fa-solid fa-sort text-[9px] opacity-30"></i></th>
+                                    <th class="p-2.5 text-right text-blue-300 cursor-pointer hover:text-white select-none" onclick="sortLots('cumPRU')" title="Prix de Revient Unitaire moyen pondéré de tous les lots jusqu'à celui-ci inclus">PRU cumulé <i id="lots-sort-icon-cumPRU" class="fa-solid fa-sort text-[9px] opacity-30"></i></th>
                                     <th class="p-2.5 text-right" title="Valeur unitaire actuelle (cours de marché)">Val. actuelle</th>
-                                    <th class="p-2.5 text-right" title="Plus-value ou moins-value latente si ce lot était vendu au cours actuel">P&amp;L latent</th>
-                                    <th class="p-2.5 text-right">Frais</th>
+                                    <th class="p-2.5 text-right cursor-pointer hover:text-white select-none" onclick="sortLots('pnl')" title="Plus-value ou moins-value latente si ce lot était vendu au cours actuel">P&amp;L latent <i id="lots-sort-icon-pnl" class="fa-solid fa-sort text-[9px] opacity-30"></i></th>
+                                    <th class="p-2.5 text-right cursor-pointer hover:text-white select-none" onclick="sortLots('frais')">Frais <i id="lots-sort-icon-frais" class="fa-solid fa-sort text-[9px] opacity-30"></i></th>
                                     <th class="p-2.5 text-center">Actions</th>
                                 </tr>
                             </thead>
