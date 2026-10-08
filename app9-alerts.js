@@ -218,6 +218,20 @@ function evaluateAlerts() {
             at: now
         });
         a.lastTriggeredAt = now;
+
+        // --- Notification système native (Chantier N) ---
+        // Chaque alerte peut choisir d'envoyer ou non une notif système via
+        // le flag `nativeNotif` (défaut : true). Le cooldown déjà appliqué
+        // plus haut empêche le spam.
+        if (a.nativeNotif !== false) {
+            const title = 'PatriMonial · ' + (a.name || 'Alerte');
+            const body  = message + (a.customMessage ? '\n' + a.customMessage : '');
+            // Envoi non bloquant : ne perturbe pas la boucle si échec
+            sendNativeNotification(title, body, {
+                tag: 'alert-' + a.id,
+                alertId: a.id
+            }).catch(() => {});
+        }
     });
 
     saveAlertsToStorage();
@@ -291,6 +305,7 @@ function updateAlertsButtonUI() {
 function openAlertsModal() {
     alerts = loadAlertsFromStorage();
     renderAlertsList();
+    updateNativeNotifUI();
     document.getElementById('modal-alerts').classList.remove('hidden');
 }
 
@@ -385,6 +400,7 @@ function openAddAlertModal() {
     document.getElementById('alert-cooldown').value = '24';
     document.getElementById('alert-custom-message').value = '';
     document.getElementById('alert-active').checked = true;
+    document.getElementById('alert-native-notif').checked = isNativeNotificationsEnabled();
 
     onAlertTypeChange();
     document.getElementById('modal-add-alert').classList.remove('hidden');
@@ -417,6 +433,7 @@ function editAlert(id) {
     document.getElementById('alert-cooldown').value = String(a.cooldownHours !== undefined ? a.cooldownHours : 24);
     document.getElementById('alert-custom-message').value = a.customMessage || '';
     document.getElementById('alert-active').checked = a.active !== false;
+    document.getElementById('alert-native-notif').checked = a.nativeNotif !== false;
 
     onAlertTypeChange();
     document.getElementById('modal-add-alert').classList.remove('hidden');
@@ -452,6 +469,7 @@ function handleAddAlert(e) {
         name: document.getElementById('alert-name').value.trim(),
         type,
         active: document.getElementById('alert-active').checked,
+        nativeNotif: document.getElementById('alert-native-notif').checked,
         cooldownHours: parseFloat(document.getElementById('alert-cooldown').value) || 24,
         customMessage: document.getElementById('alert-custom-message').value.trim()
     };

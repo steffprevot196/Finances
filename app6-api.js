@@ -150,6 +150,372 @@ async function fetchFrankfurterHistory(currency, days = 365) {
         .sort((a, b) => a.date - b.date);
 }
 
+// =====================================================================
+// MULTI-DEVISES — Service de taux de change EUR (Chantier 1.2)
+// ---------------------------------------------------------------------
+// Fournit :
+//   • getFxRateToEUR(currency, dateISO)  → taux EUR/devise à une date
+//   • getCurrentFxRateToEUR(currency)    → taux du jour (ou dernier dispo)
+//   • convertToEUR(amount, currency, dateISO) → conversion
+//   • buildCurrencyExposure(list)        → agrégat pour KPI "Exposition devise"
+//
+// Sources et stratégie :
+//   1. Cache mémoire (fxRateCache) → instantané si déjà calculé
+//   2. IndexedDB (store dédié 'fxRates') → persistant entre sessions
+//   3. API Frankfurter (BCE) → taux officiels quotidiens
+//   4. Fallback statique (dernière valeur connue en dur) → garantit un résultat
+//      même hors-ligne, avec un avertissement explicite dans la console.
+//
+// ⚠️ Convention : on stocke / retourne TOUJOURS le taux dans le sens
+// "combien d'EUR vaut 1 unité de la devise cible".
+//   EUR→EUR = 1.0
+//   USD→EUR = ~0.92 (1 USD vaut ~0,92 €)
+//   JPY→EUR = ~0.0062 (1 JPY vaut ~0,0062 €)
+// =====================================================================
+
+const FX_SUPPORTED = ['EUR', 'USD', 'GBP', 'CHF', 'JPY'];
+
+// Fallback statique (valeurs indicatives 2024-2025, jamais parfaites mais
+// toujours disponibles même si les APIs sont bloquées).
+const FX_FALLBACK = {
+    EUR: 1.0,
+    USD: 0.92,
+    GBP: 1.18,
+    CHF: 1.05,
+    JPY: 0.0062
+};
+
+// =====================================================================
+// BENCHMARK RÉEL — CW8.PA (Amundi MSCI World, Chantier 1.6)
+// ---------------------------------------------------------------------
+// Remplace l'hypothèse de corrélation 0.7 par un vrai calcul apparié :
+//   • Bêta / R² / Alpha / Tracking Error / Ratio d'Information / Treynor
+//     calculés sur les mêmes dates que le portefeuille.
+// Sources (cascade) :
+//   1. Twelve Data si clé API configurée (source principale, CORS natif)
+//   2. Yahoo Finance via proxy CORS (fallback universel)
+//   3. Fallback statique : rendements annuels MSCI World 2014-2024
+//      déjà définis dans MSCI_WORLD_ANNUAL_RETURNS_EUR (app1-core.js)
+//
+// La série est persistée dans IndexedDB (store PRICE_DB_STORE, clé
+// 'BENCHMARK_CW8') pour éviter de retélécharger à chaque session.
+// =====================================================================
+
+// Symboles essayés en cascade pour le benchmark (CW8.PA est le plus
+// représentatif pour un investisseur français — éligible PEA).
+const BENCHMARK_SYMBOLS = ['CW8.PA', 'EWLD.PA', 'CW8', 'URTH', 'IWDA.AS'];
+const BENCHMARK_STORAGE_KEY = 'BENCHMARK_CW8';
+
+// Cache mémoire de la série benchmark : tableau [{ date, price }]
+let benchmarkSeriesCache = null;
+let benchmarkMetaCache = null;  // { symbol, updatedAt, source }
+
+// Récupère la série benchmark depuis IndexedDB (ou null si absente).
+async function loadBenchmarkFromDB() {
+    if (benchmarkSeriesCache) return benchmarkSeriesCache;
+    try {
+        const stored = await priceDBGet(BENCHMARK_STORAGE_KEY);
+        if (stored && Array.isArray(stored.series) && stored.series.length >= 30) {
+            benchmarkSeriesCache = stored.series;
+            benchmarkMetaCache = {
+                symbol: stored.symbol || '—',
+                updatedAt: stored.updatedAt || 0,
+                source: stored.source || 'cache'
+            };
+            return benchmarkSeriesCache;
+        }
+    } catch (_) {}
+    return null;
+}
+
+// Télécharge la série benchmark via Twelve Data puis Yahoo (cascade).
+// Renvoie { series, symbol, source } ou throw si toutes les sources échouent.
+async function fetchBenchmarkSeries() {
+    const errors = [];
+
+    // 1) Twelve Data (si configuré)
+    if (twelveDataApiKey) {
+        for (const sym of BENCHMARK_SYMBOLS) {
+            try {
+                const series = await fetchTwelveDataHistory(sym, 730);
+                if (Array.isArray(series) && series.length >= 60) {
+                    return { series, symbol: sym, source: 'Twelve Data' };
+                }
+            } catch (err) {
+                errors.push(`${sym} (12D: ${err.message})`);
+            }
+        }
+    }
+
+    // 2) Yahoo via proxy CORS
+    for (const sym of BENCHMARK_SYMBOLS) {
+        try {
+            const series = await fetchYahooHistory(sym, 730);
+            if (Array.isArray(series) && series.length >= 60) {
+                return { series, symbol: sym, source: 'Yahoo' };
+            }
+        } catch (err) {
+            errors.push(`${sym} (Yahoo: ${err.message})`);
+        }
+    }
+
+    throw new Error('Aucune source benchmark disponible. Détails : ' + errors.join(' | '));
+}
+
+// Rafraîchit la série benchmark (fetch + persistance IndexedDB + cache mémoire).
+// opts.force = true → refetch même si un cache < 24h existe.
+async function refreshBenchmarkSeries(opts = {}) {
+    const force = !!opts.force;
+
+    // Vérifie la fraîcheur du cache DB
+    if (!force) {
+        const existing = await loadBenchmarkFromDB();
+        if (existing && benchmarkMetaCache && benchmarkMetaCache.updatedAt) {
+            const ageMs = Date.now() - benchmarkMetaCache.updatedAt;
+            if (ageMs < 24 * 3600 * 1000) {
+                return { refreshed: false, series: existing, meta: benchmarkMetaCache };
+            }
+        }
+    }
+
+    const { series, symbol, source } = await fetchBenchmarkSeries();
+
+    // Persiste
+    try {
+        await priceDBSet(BENCHMARK_STORAGE_KEY, {
+            updatedAt: Date.now(),
+            symbol, source, series
+        });
+    } catch (_) { /* silencieux : le cache mémoire suffit pour la session */ }
+
+    benchmarkSeriesCache = series;
+    benchmarkMetaCache = { symbol, source, updatedAt: Date.now() };
+
+    return { refreshed: true, series, meta: benchmarkMetaCache };
+}
+
+// Helpers : renvoie la série en cache (mémoire → DB), ou null.
+async function getBenchmarkSeries() {
+    if (benchmarkSeriesCache) return benchmarkSeriesCache;
+    return await loadBenchmarkFromDB();
+}
+
+// Indique si un benchmark réel est disponible (sans fetch).
+function hasBenchmarkAvailable() {
+    return !!(benchmarkSeriesCache && benchmarkSeriesCache.length >= 60);
+}
+
+// Cache mémoire : clé = 'USD_2024-03-15' ou 'USD_latest', valeur = taux
+const fxRateCache = new Map();
+
+function _fxCacheKey(currency, dateISO) {
+    return currency + '_' + (dateISO || 'latest');
+}
+
+// Ouvre (et crée si besoin) le store IndexedDB pour les taux de change.
+// On utilise le même nom de DB que les séries de prix, mais un store dédié.
+const FX_DB_NAME  = 'patriMonialPriceHistory';
+const FX_DB_STORE = 'fxRates';
+
+function openFxDB() {
+    return new Promise((resolve, reject) => {
+        if (!window.indexedDB) { reject(new Error('IndexedDB indisponible.')); return; }
+        const req = indexedDB.open(FX_DB_NAME, 2);  // version 2 pour ajouter le store
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(PRICE_DB_STORE)) {
+                db.createObjectStore(PRICE_DB_STORE);
+            }
+            if (!db.objectStoreNames.contains(FX_DB_STORE)) {
+                db.createObjectStore(FX_DB_STORE);
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror   = () => reject(req.error);
+    });
+}
+
+async function fxDBGet(key) {
+    try {
+        const db = await openFxDB();
+        return await new Promise((resolve, reject) => {
+            const req = db.transaction(FX_DB_STORE, 'readonly').objectStore(FX_DB_STORE).get(key);
+            req.onsuccess = () => { db.close(); resolve(req.result || null); };
+            req.onerror   = () => { db.close(); reject(req.error); };
+        });
+    } catch (_) { return null; }
+}
+
+async function fxDBSet(key, value) {
+    try {
+        const db = await openFxDB();
+        return await new Promise((resolve, reject) => {
+            const tx = db.transaction(FX_DB_STORE, 'readwrite');
+            tx.objectStore(FX_DB_STORE).put(value, key);
+            tx.oncomplete = () => { db.close(); resolve(); };
+            tx.onerror    = () => { db.close(); reject(tx.error); };
+        });
+    } catch (_) { /* silencieux : le cache mémoire prendra le relais */ }
+}
+
+// Récupère l'historique complet des taux EUR→devise sur 2 ans (1 seul appel
+// API pour tout l'historique, puis on pioche dedans par date).
+// Retourne un objet { 'YYYY-MM-DD': rate_eur_par_devise }.
+async function _fetchFxHistory(currency, days = 730) {
+    const end = new Date();
+    const start = new Date(Date.now() - days * 864e5);
+    const fmt = d => d.toISOString().slice(0, 10);
+    const res = await fetch(`https://api.frankfurter.dev/v1/${fmt(start)}..${fmt(end)}?base=EUR&symbols=${currency}`);
+    if (!res.ok) throw new Error(`Frankfurter HTTP ${res.status}`);
+    const data = await res.json();
+    // L'API renvoie { '2024-03-15': { USD: 1.087 }, ... } : 1 EUR = 1.087 USD
+    // On veut le taux inverse : combien d'EUR vaut 1 USD → 1 / 1.087
+    const map = {};
+    Object.entries(data.rates || {}).forEach(([date, rates]) => {
+        if (rates[currency] > 0) map[date] = 1 / rates[currency];
+    });
+    return map;
+}
+
+// Trouve la date la plus proche dans un map { 'YYYY-MM-DD': rate } pour une
+// date cible (tolérance max : 7 jours en arrière, puis on abandonne).
+function _pickClosestRate(ratesMap, targetDateISO) {
+    if (!targetDateISO) return null;
+    const keys = Object.keys(ratesMap).sort();
+    if (!keys.length) return null;
+
+    const target = new Date(targetDateISO).getTime();
+    if (isNaN(target)) return null;
+
+    let best = null, bestDelta = Infinity;
+    for (const k of keys) {
+        const t = new Date(k).getTime();
+        if (t > target) break;  // pas de taux "futur"
+        const delta = target - t;
+        if (delta < bestDelta) { bestDelta = delta; best = k; }
+    }
+    if (best && bestDelta <= 7 * 864e5) return { date: best, rate: ratesMap[best] };
+    return null;
+}
+
+// API PUBLIQUE — récupère le taux EUR/devise à une date donnée.
+//   • currency : 'USD', 'GBP', 'CHF', 'JPY', 'EUR'…
+//   • dateISO  : 'YYYY-MM-DD' (optionnel ; si absent → taux du jour)
+//   • opts.allowFetch : si false, n'appelle PAS l'API (mode rapide/sync).
+// Retourne un nombre (ex: 0.92 pour USD→EUR) ou null si inconnu.
+async function getFxRateToEUR(currency, dateISO, opts = {}) {
+    const cur = String(currency || 'EUR').toUpperCase();
+    if (cur === 'EUR') return 1.0;
+    if (!FX_SUPPORTED.includes(cur)) {
+        console.warn(`[FX] Devise non supportée : ${cur}. Retour au fallback 1.0.`);
+        return FX_FALLBACK[cur] || null;
+    }
+
+    const cacheKey = _fxCacheKey(cur, dateISO);
+    if (fxRateCache.has(cacheKey)) return fxRateCache.get(cacheKey);
+
+    // Historique complet mis en cache dans IndexedDB (clé 'history_<devise>')
+    const historyKey = 'history_' + cur;
+    let history = await fxDBGet(historyKey);
+
+    // Si l'historique est absent ou date de plus de 24h → refetch (sauf si allowFetch=false)
+    const isStale = !history || !history.updatedAt || (Date.now() - history.updatedAt > 24 * 3600 * 1000);
+    if (isStale && opts.allowFetch !== false) {
+        try {
+            const ratesMap = await _fetchFxHistory(cur);
+            history = { updatedAt: Date.now(), rates: ratesMap };
+            await fxDBSet(historyKey, history);
+        } catch (err) {
+            console.warn(`[FX] Échec fetch historique ${cur} :`, err.message);
+            // On garde l'ancien cache s'il existe
+            if (!history || !history.rates) {
+                const fb = FX_FALLBACK[cur] || null;
+                if (fb !== null) fxRateCache.set(cacheKey, fb);
+                return fb;
+            }
+        }
+    }
+
+    if (!history || !history.rates) {
+        const fb = FX_FALLBACK[cur] || null;
+        if (fb !== null) fxRateCache.set(cacheKey, fb);
+        return fb;
+    }
+
+    // Cherche la date la plus proche (ou "dernier taux connu" si dateISO absent)
+    let rate = null;
+    if (dateISO) {
+        const found = _pickClosestRate(history.rates, dateISO);
+        if (found) rate = found.rate;
+    } else {
+        // Dernier taux connu
+        const keys = Object.keys(history.rates).sort();
+        if (keys.length) rate = history.rates[keys[keys.length - 1]];
+    }
+
+    if (rate === null) rate = FX_FALLBACK[cur] || null;
+
+    if (rate !== null) fxRateCache.set(cacheKey, rate);
+    return rate;
+}
+
+// Wrapper synchrone : retourne le taux du jour depuis le cache si présent,
+// sinon le fallback statique. Utile pour les fonctions non-async.
+function getFxRateSync(currency) {
+    const cur = String(currency || 'EUR').toUpperCase();
+    if (cur === 'EUR') return 1.0;
+    const cacheKey = _fxCacheKey(cur, 'latest');
+    if (fxRateCache.has(cacheKey)) return fxRateCache.get(cacheKey);
+    // Tente 'latest' sans date
+    const k2 = _fxCacheKey(cur, undefined);
+    if (fxRateCache.has(k2)) return fxRateCache.get(k2);
+    return FX_FALLBACK[cur] || 1.0;
+}
+
+// Convertit un montant en devise native vers EUR, à une date donnée.
+async function convertToEUR(amount, currency, dateISO) {
+    const rate = await getFxRateToEUR(currency, dateISO);
+    if (rate === null) return null;
+    return amount * rate;
+}
+
+// Précharge les taux des devises utilisées par le portefeuille (appelé au boot
+// ou après un import). Non bloquant.
+async function preloadUsedCurrencies() {
+    const currencies = new Set();
+    assets.forEach(a => {
+        if (a.currency && a.currency !== 'EUR') currencies.add(a.currency);
+    });
+    if (!currencies.size) return;
+    const today = new Date().toISOString().slice(0, 10);
+    await Promise.all([...currencies].map(c =>
+        getFxRateToEUR(c, today).catch(() => null)
+    ));
+}
+
+// =====================================================================
+// EXPOSITION DEVISE — agrégation pour KPI
+// =====================================================================
+// Renvoie un tableau trié par valeur EUR décroissante :
+//   [{ currency, valueEUR, pct, count, assetIds }]
+function buildCurrencyExposure(list) {
+    const src = (list || assets).filter(a => !isPaperAsset(a));
+    const total = src.reduce((s, a) => s + (a.value || 0), 0);
+    if (total <= 0) return [];
+
+    const byCur = {};
+    src.forEach(a => {
+        const cur = (a.currency || 'EUR').toUpperCase();
+        if (!byCur[cur]) byCur[cur] = { currency: cur, valueEUR: 0, count: 0, assetIds: [] };
+        byCur[cur].valueEUR += a.value || 0;
+        byCur[cur].count    += 1;
+        byCur[cur].assetIds.push(a.id);
+    });
+    return Object.values(byCur)
+        .map(g => ({ ...g, pct: (g.valueEUR / total) * 100 }))
+        .sort((a, b) => b.valueEUR - a.valueEUR);
+}
+
 // Bouton "Historique de prix" : télécharge l'historique réel (1 an) pour
 // toutes les cryptos et devises reconnues du portefeuille.
 async function refreshRealPriceHistory() {
@@ -579,10 +945,23 @@ function refreshAllUI() {
     renderArbitragesTable();
     computeAdvancedStats();
 
-    if (activeTab === 'tab-dashboard') initDashboardCharts();
+    if (activeTab === 'tab-dashboard') {
+        initDashboardCharts();
+        // Chantier §3 — comparateur CW8 (rendu automatique sur le dashboard)
+        if (typeof renderCw8Comparison === 'function') renderCw8Comparison();
+        // Chantier §3 — scoring ESG du portefeuille
+        if (typeof renderEsgDashboardSection === 'function') renderEsgDashboardSection();
+    }
     else if (activeTab === 'tab-gave') initGaveDonutChart();
     else if (activeTab === 'tab-strategies' && typeof renderStrategiesTab === 'function') renderStrategiesTab();
-    else if (activeTab === 'tab-objectifs' && typeof renderGoalsTab === 'function') renderGoalsTab();
+    else if (activeTab === 'tab-objectifs' && typeof renderGoalsTab === 'function') {
+        renderGoalsTab();
+        // Chantier §3 — simulateur PER (rendu automatique sur l'onglet Objectifs)
+        if (typeof renderPerPanel === 'function') renderPerPanel();
+    }
+    else if (activeTab === 'tab-watchlist' && typeof renderWatchlistTab === 'function') renderWatchlistTab();
+    else if (activeTab === 'tab-annee-n1' && typeof renderTaxOptimizer === 'function') renderTaxOptimizer();
+    else if (activeTab === 'tab-ledger' && typeof renderLedgerTab === 'function') renderLedgerTab();
 
     if (compareActive) {
         if (compareSegmentA) renderComparePanel('A');
@@ -599,8 +978,17 @@ function refreshAllUI() {
     // Recalcul du TRI (Chantier G) — invalidate cache + KPI global
     if (typeof refreshTIR === 'function') refreshTIR();
 
+    // Recalcul des KPI de revenus passifs (Chantier 1.1)
+    if (typeof renderDividendsKPIs === 'function') renderDividendsKPIs();
+
+    // Recalcul des KPI d'exposition devise (Chantier 1.2)
+    if (typeof renderCurrencyExposureKPI === 'function') renderCurrencyExposureKPI();
+
     // Recalcul du scoring des actifs (Chantier H) — leaderboard + cache
     if (typeof refreshScoring === 'function') refreshScoring();
+
+    // Suggestions intelligentes (Chantier L)
+    if (typeof renderSuggestions === 'function') renderSuggestions();
 }
 
 // =====================================================================
@@ -660,6 +1048,13 @@ function openDriveSyncModal() {
     document.getElementById('drive-client-id-input').value = getDriveClientId();
     renderDriveBackupList();
     updateDriveSyncStatus();
+    // Chantier 5.2 — affiche l'état du miroir IndexedDB + l'aperçu de compaction
+    if (typeof refreshIdbSection === 'function') {
+        refreshIdbSection();
+    }
+    if (typeof refreshCompactionPreview === 'function') {
+        refreshCompactionPreview();
+    }
     document.getElementById('modal-drive-sync').classList.remove('hidden');
 }
 
@@ -1142,3 +1537,456 @@ function handleManualGoldUpdate(e) {
 }
 
 // =====================================================================
+
+
+// =====================================================================
+// SAUVEGARDE AUTOMATIQUE GOOGLE DRIVE (Chantier M)
+// ---------------------------------------------------------------------
+// Déclenche un push silencieux si :
+//   • le dernier backup Drive date de plus de 24 h
+//   • l'utilisateur est déjà connecté à Drive (driveAccessToken présent)
+//   • une clé maîtresse est mémorisée sur cet appareil
+// Si l'une de ces conditions n'est pas remplie, on ne fait RIEN — pas de
+// popup OAuth surprise, pas de demande de mot de passe inopinée.
+// =====================================================================
+
+const AUTO_BACKUP_KEY = 'patriMonial_lastAutoDriveBackup';
+const AUTO_BACKUP_INTERVAL_MS = 24 * 3600 * 1000; // 24 h
+
+// Renvoie true si un push silencieux peut / doit être déclenché.
+async function shouldAutoBackupToDrive() {
+    // 1) Connecté à Drive ?
+    if (!driveAccessToken) return false;
+
+    // 2) Clé maîtresse mémorisée ?
+    try {
+        const has = await hasStoredMasterKey();
+        if (!has) return false;
+    } catch (_) { return false; }
+
+    // 3) Intervalle écoulé ?
+    const lastStr = localStorage.getItem(AUTO_BACKUP_KEY);
+    if (lastStr) {
+        const last = parseInt(lastStr, 10);
+        if (Number.isFinite(last) && (Date.now() - last) < AUTO_BACKUP_INTERVAL_MS) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Push silencieux — n'affiche aucune boîte de dialogue, ne demande rien.
+// Retourne true si succès, false sinon. Les erreurs sont loggées en console
+// uniquement (pas d'alerte).
+async function performSilentDriveBackup() {
+    try {
+        const envelope = await encryptPayload(currentDataSnapshot(), '__cached__');
+        const metadata = {
+            name: 'patrimonial-backup-auto-' + Date.now() + '.json',
+            parents: ['appDataFolder']
+        };
+        const form = new FormData();
+        form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+        form.append('file', new Blob([JSON.stringify(envelope)], { type: 'application/json' }));
+
+        const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + driveAccessToken },
+            body: form
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+
+        localStorage.setItem(AUTO_BACKUP_KEY, String(Date.now()));
+        console.info('[Auto-Backup] Sauvegarde silencieuse envoyée sur Drive.');
+        return true;
+    } catch (err) {
+        console.warn('[Auto-Backup] Échec du push silencieux :', err);
+        return false;
+    }
+}
+
+// Point d'entrée appelé au démarrage par app7-init.js. Vérifie l'opportunité
+// et déclenche le push en arrière-plan si possible.
+async function checkAndRunAutoDriveBackup() {
+    try {
+        const should = await shouldAutoBackupToDrive();
+        if (!should) return;
+
+        // Léger différé pour ne pas bloquer le premier rendu
+        setTimeout(async () => {
+            const ok = await performSilentDriveBackup();
+            if (ok && typeof showUndoToast === 'function') {
+                // Utilise le toast Undo existant (non intrusif, disparaît seul)
+                showUndoToast('Sauvegarde Drive automatique effectuée.', false);
+            }
+        }, 2500);
+    } catch (err) {
+        console.warn('[Auto-Backup] Erreur :', err);
+    }
+}
+
+// Force un backup manuel silencieux (bouton "Sauvegarder maintenant" depuis
+// le modal Drive, ou raccourci clavier).
+async function forceAutoDriveBackup() {
+    if (!driveAccessToken) {
+        alert('Connectez-vous d\'abord à Google Drive (bouton "Se connecter à Drive").');
+        return;
+    }
+    const has = await hasStoredMasterKey();
+    if (!has) {
+        alert('Aucune phrase secrète mémorisée. Faites au moins un envoi manuel avec une phrase pour activer la sauvegarde automatique.');
+        return;
+    }
+    const ok = await performSilentDriveBackup();
+    if (ok) {
+        if (typeof showUndoToast === 'function') {
+            showUndoToast('Sauvegarde Drive manuelle effectuée.', false);
+        }
+    } else {
+        alert('Échec de la sauvegarde silencieuse. Vérifiez votre connexion.');
+    }
+}
+
+// =====================================================================
+// BENCHMARK RÉEL — Bouton de téléchargement (Chantier 1.6)
+// =====================================================================
+// Télécharge la série historique du benchmark (CW8.PA en priorité) et
+// force un recalcul complet des ratios de risque.
+async function downloadBenchmarkAndRecalc(force = false) {
+    const btn  = document.getElementById('btn-download-benchmark');
+    const icon = document.getElementById('icon-download-benchmark');
+    if (btn)  btn.disabled = true;
+    if (icon) icon.classList.add('fa-spin');
+
+    showProgressToast('Téléchargement du benchmark…', 'CW8.PA (MSCI World)', 20);
+
+    try {
+        const result = await refreshBenchmarkSeries({ force: true });
+        updateProgressToast(`Symbole : ${result.meta.symbol} · ${result.series.length} points`, 70);
+
+        // Force un recalcul immédiat
+        if (typeof invalidateTIRCache === 'function') invalidateTIRCache();
+        if (typeof calculateRiskMetrics === 'function') calculateRiskMetrics();
+
+        updateProgressToast('Ratios recalculés', 100);
+        hideProgressToast(400);
+
+        if (typeof showUndoToast === 'function') {
+            showUndoToast(`Benchmark ${result.meta.symbol} chargé (${result.series.length} points, source ${result.meta.source})`, false);
+        }
+    } catch (err) {
+        hideProgressToast(0);
+        alert(
+            `Impossible de télécharger le benchmark :\n\n${err.message}\n\n` +
+            `Sources testées : ${BENCHMARK_SYMBOLS.join(', ')}\n\n` +
+            `Vérifiez votre connexion, ou configurez une clé Twelve Data ` +
+            `(bouton « Synchronisation ») pour une source plus fiable.`
+        );
+    } finally {
+        if (btn)  btn.disabled = false;
+        if (icon) icon.classList.remove('fa-spin');
+    }
+}
+
+// =====================================================================
+// SECTION INDEXEDDB — Modal Synchronisation (Chantier 5.2)
+// =====================================================================
+// Affiche l'état du miroir IndexedDB (date du dernier snapshot, nombre
+// d'entités) et propose une restauration manuelle ou un snapshot immédiat.
+
+async function refreshIdbSection() {
+    const infoEl  = document.getElementById('idb-snapshot-info');
+    const badgeEl = document.getElementById('idb-status-badge');
+    if (!infoEl) return;
+
+    // Vérifie la disponibilité d'IndexedDB
+    if (!window.indexedDB || typeof loadFromIdb !== 'function') {
+        infoEl.innerHTML = '<div class="text-gray-500 italic">IndexedDB non disponible dans ce navigateur.</div>';
+        if (badgeEl) {
+            badgeEl.innerText = 'Indisponible';
+            badgeEl.className = 'text-[9px] px-1.5 py-0.5 rounded border border-rose-800/50 bg-rose-950/40 text-rose-300 font-normal';
+        }
+        return;
+    }
+
+    // Force un snapshot immédiat si demandé par l'utilisateur
+    // (le bouton "Snapshot maintenant" appelle refreshIdbSection après forceIdbMirror)
+
+    try {
+        const idbData = await loadFromIdb(currentPortfolioId);
+
+        if (!idbData || (!idbData.assets && !idbData.cessions && !idbData.arbitrages)) {
+            infoEl.innerHTML = '<div class="text-gray-500 italic">Aucun snapshot enregistré pour ce portefeuille.</div>';
+            if (badgeEl) {
+                badgeEl.innerText = 'Vide';
+                badgeEl.className = 'text-[9px] px-1.5 py-0.5 rounded border border-gray-700 bg-gray-800 text-gray-500 font-normal';
+            }
+            return;
+        }
+
+        const countA  = Array.isArray(idbData.assets) ? idbData.assets.length : 0;
+        const countC  = Array.isArray(idbData.cessions) ? idbData.cessions.length : 0;
+        const countAr = Array.isArray(idbData.arbitrages) ? idbData.arbitrages.length : 0;
+        const dateStr = idbData.updatedAt
+            ? new Date(idbData.updatedAt).toLocaleString('fr-FR')
+            : 'date inconnue';
+
+        // Calcule la fraîcheur
+        const ageMin = idbData.updatedAt ? Math.round((Date.now() - idbData.updatedAt) / 60000) : null;
+        const freshLabel = ageMin === null ? '—'
+            : ageMin < 1 ? 'à l\'instant'
+            : ageMin < 60 ? `il y a ${ageMin} min`
+            : ageMin < 1440 ? `il y a ${Math.floor(ageMin / 60)} h`
+            : `il y a ${Math.floor(ageMin / 1440)} j`;
+        const freshColor = ageMin === null ? 'text-gray-500'
+            : ageMin < 60 ? 'text-emerald-400'
+            : ageMin < 1440 ? 'text-amber-400'
+            : 'text-rose-400';
+
+        infoEl.innerHTML = `
+            <div class="flex justify-between items-baseline gap-2">
+                <span class="text-gray-400">Dernier snapshot :</span>
+                <span class="text-gray-200 font-mono text-[10px]">${escapeHTML(dateStr)}</span>
+            </div>
+            <div class="flex justify-between items-baseline gap-2">
+                <span class="text-gray-400">Fraîcheur :</span>
+                <span class="${freshColor} font-mono text-[10px]">${freshLabel}</span>
+            </div>
+            <div class="flex justify-between items-baseline gap-2 pt-1 border-t border-gray-800 mt-1">
+                <span class="text-gray-400">Contenu :</span>
+                <span class="text-gray-300 font-mono text-[10px]">${countA} actif(s) · ${countC} cession(s) · ${countAr} arbitrage(s)</span>
+            </div>
+        `;
+
+        if (badgeEl) {
+            if (ageMin !== null && ageMin < 60) {
+                badgeEl.innerText = 'À jour';
+                badgeEl.className = 'text-[9px] px-1.5 py-0.5 rounded border border-emerald-800/50 bg-emerald-950/40 text-emerald-300 font-normal';
+            } else if (ageMin !== null && ageMin < 1440) {
+                badgeEl.innerText = 'Récent';
+                badgeEl.className = 'text-[9px] px-1.5 py-0.5 rounded border border-amber-800/50 bg-amber-950/40 text-amber-300 font-normal';
+            } else {
+                badgeEl.innerText = 'Ancien';
+                badgeEl.className = 'text-[9px] px-1.5 py-0.5 rounded border border-rose-800/50 bg-rose-950/40 text-rose-300 font-normal';
+            }
+        }
+    } catch (err) {
+        console.warn('[IDB Section] Erreur :', err);
+        infoEl.innerHTML = `<div class="text-rose-400 text-[10px]">Erreur de lecture : ${escapeHTML(err.message)}</div>`;
+    }
+}
+
+// Force un snapshot immédiat dans IndexedDB puis rafraîchit la section.
+async function forceIdbSnapshotNow() {
+    if (typeof forceIdbMirror !== 'function') return;
+    try {
+        await forceIdbMirror();
+        if (typeof toastSuccess === 'function') {
+            toastSuccess('Snapshot IndexedDB', 'Écriture immédiate effectuée.');
+        }
+        await refreshIdbSection();
+    } catch (err) {
+        if (typeof toastError === 'function') {
+            toastError('Snapshot échoué', err.message || 'Erreur inconnue');
+        }
+    }
+}
+
+// Restauration manuelle depuis IndexedDB (avec confirmation).
+async function restoreFromIdbManual() {
+    if (typeof loadFromIdb !== 'function') {
+        alert('Module IndexedDB non disponible.');
+        return;
+    }
+    const idbData = await loadFromIdb(currentPortfolioId);
+    if (!idbData || (!idbData.assets && !idbData.cessions && !idbData.arbitrages)) {
+        alert('Aucun snapshot IndexedDB disponible pour ce portefeuille.');
+        return;
+    }
+
+    const countA  = Array.isArray(idbData.assets) ? idbData.assets.length : 0;
+    const countC  = Array.isArray(idbData.cessions) ? idbData.cessions.length : 0;
+    const countAr = Array.isArray(idbData.arbitrages) ? idbData.arbitrages.length : 0;
+    const dateStr = idbData.updatedAt ? new Date(idbData.updatedAt).toLocaleString('fr-FR') : '—';
+
+    if (!confirm(
+        `Restaurer depuis IndexedDB ?\n\n` +
+        `Date du snapshot : ${dateStr}\n` +
+        `Contenu : ${countA} actif(s) · ${countC} cession(s) · ${countAr} arbitrage(s)\n\n` +
+        `Vos données actuelles seront REMPLACÉES. Une sauvegarde locale de l'état actuel sera créée avant.`
+    )) return;
+
+    // Sauvegarde défensive avant écrasement
+    if (typeof createSnapshot === 'function') createSnapshot('Avant restauration IDB');
+    if (typeof pushUndo === 'function') pushUndo('Restauration IndexedDB (manuelle)');
+
+    // Restaure chaque ensemble disponible
+    if (Array.isArray(idbData.assets))      assets = idbData.assets;
+    if (Array.isArray(idbData.cessions))    cessions = idbData.cessions;
+    if (Array.isArray(idbData.arbitrages))  arbitrages = idbData.arbitrages;
+
+    // Normalisation
+    assets.forEach(a => { if (typeof migrateAssetToV2 === 'function') migrateAssetToV2(a); });
+    cessions.forEach(c => { if (typeof normalizeCession === 'function') normalizeCession(c); });
+
+    // Persistance
+    if (typeof saveToStorage === 'function') saveToStorage();
+    if (typeof saveCessions === 'function') saveCessions();
+    if (typeof saveArbitrages === 'function') saveArbitrages();
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+
+    if (typeof toastSuccess === 'function') {
+        toastSuccess('Données restaurées', `${countA} actif(s) · ${countC} cession(s) · ${countAr} arbitrage(s)`);
+    }
+    closeModal('modal-drive-sync');
+}
+
+// Expose l'API globalement
+window.refreshIdbSection = refreshIdbSection;
+window.forceIdbSnapshotNow = forceIdbSnapshotNow;
+window.restoreFromIdbManual = restoreFromIdbManual;
+
+// =====================================================================
+// SECTION COMPACTION D'HISTORIQUE (Chantier 5.2 — dette technique)
+// =====================================================================
+// Affiche l'aperçu de ce qui serait supprimé pour un nombre d'années
+// donné, puis applique la compaction avec undo (Ctrl+Z).
+
+let _compactionYears = 2;
+
+function onCompactionYearsChange(value) {
+    const v = parseInt(value, 10);
+    _compactionYears = Number.isFinite(v) && v >= 1 ? v : 2;
+    const labelEl = document.getElementById('compaction-years-label');
+    if (labelEl) labelEl.innerText = _compactionYears + (_compactionYears > 1 ? ' ans' : ' an');
+    refreshCompactionPreview();
+}
+
+// Calcule et affiche l'aperçu sans modifier les données
+function refreshCompactionPreview() {
+    const previewEl = document.getElementById('compaction-preview');
+    const badgeEl = document.getElementById('compaction-size-badge');
+    if (!previewEl) return;
+
+    // Vérifie que la fonction est disponible
+    if (typeof previewHistoryCompaction !== 'function') {
+        previewEl.innerHTML = '<div class="text-gray-500 italic">Module de compaction non disponible.</div>';
+        return;
+    }
+
+    const preview = previewHistoryCompaction(_compactionYears);
+    const { assetsAffected, pointsRemoved, currentBytes, estimatedBytes } = preview;
+
+    // Badge de taille
+    if (badgeEl && typeof formatBytes === 'function') {
+        badgeEl.innerText = formatBytes(currentBytes);
+        badgeEl.className = currentBytes > 4 * 1024 * 1024
+            ? 'text-[9px] px-1.5 py-0.5 rounded border border-rose-800/50 bg-rose-950/40 text-rose-300 font-normal'
+            : currentBytes > 2 * 1024 * 1024
+                ? 'text-[9px] px-1.5 py-0.5 rounded border border-amber-800/50 bg-amber-950/40 text-amber-300 font-normal'
+                : 'text-[9px] px-1.5 py-0.5 rounded border border-emerald-800/50 bg-emerald-950/40 text-emerald-300 font-normal';
+    }
+
+    // Pas de suppression à faire
+    if (pointsRemoved === 0) {
+        previewEl.innerHTML = `
+            <div class="flex items-center gap-2 text-emerald-400">
+                <i class="fa-solid fa-circle-check text-[11px]"></i>
+                <span>Aucun point à supprimer pour ${_compactionYears} an${_compactionYears > 1 ? 's' : ''}.</span>
+            </div>
+            <div class="text-[10px] text-gray-500">Taille actuelle : <span class="font-mono text-gray-400">${formatBytes(currentBytes)}</span></div>
+        `;
+        const applyBtn = document.getElementById('compaction-apply-btn');
+        if (applyBtn) applyBtn.disabled = true;
+        return;
+    }
+
+    // Aperçu chiffré
+    const ratio = currentBytes > 0 ? (1 - estimatedBytes / currentBytes) * 100 : 0;
+    previewEl.innerHTML = `
+        <div class="flex justify-between items-baseline">
+            <span class="text-gray-400">Points à supprimer :</span>
+            <span class="font-mono font-bold text-amber-300">${pointsRemoved.toLocaleString('fr-FR')}</span>
+        </div>
+        <div class="flex justify-between items-baseline">
+            <span class="text-gray-400">Actifs concernés :</span>
+            <span class="font-mono text-gray-300">${assetsAffected}</span>
+        </div>
+        <div class="flex justify-between items-baseline pt-1 border-t border-gray-800 mt-1">
+            <span class="text-gray-400">Taille avant :</span>
+            <span class="font-mono text-gray-300">${formatBytes(currentBytes)}</span>
+        </div>
+        <div class="flex justify-between items-baseline">
+            <span class="text-gray-400">Taille estimée après :</span>
+            <span class="font-mono text-emerald-400">${formatBytes(estimatedBytes)} <span class="text-[10px] text-emerald-300/70">(−${ratio.toFixed(0)} %)</span></span>
+        </div>
+        <div class="text-[10px] text-gray-500 mt-1.5 leading-relaxed">
+            <i class="fa-solid fa-circle-info text-blue-400 mr-1"></i>
+            <b>Non impacté :</b> lots, achats, cessions, TRI, fiscalité, badge session, sparkline 30 j, heatmap 12 mois.
+        </div>
+    `;
+
+    const applyBtn = document.getElementById('compaction-apply-btn');
+    if (applyBtn) applyBtn.disabled = false;
+}
+
+// Applique la compaction après confirmation.
+async function applyCompaction() {
+    if (typeof compactAllHistories !== 'function') {
+        alert('Module de compaction non disponible.');
+        return;
+    }
+
+    const preview = previewHistoryCompaction(_compactionYears);
+    if (preview.pointsRemoved === 0) {
+        if (typeof toastInfo === 'function') {
+            toastInfo('Rien à compacter', `Aucun point d'historique de plus de ${_compactionYears} an${_compactionYears > 1 ? 's' : ''}.`);
+        }
+        return;
+    }
+
+    if (!confirm(
+        `Compacter l'historique ?\n\n` +
+        `• Points supprimés : ${preview.pointsRemoved.toLocaleString('fr-FR')}\n` +
+        `• Actifs concernés : ${preview.assetsAffected}\n` +
+        `• Taille : ${formatBytes(preview.currentBytes)} → ≈ ${formatBytes(preview.estimatedBytes)}\n\n` +
+        `Les données suivantes sont PRÉSERVÉES :\n` +
+        `  ✓ Lots et prix de revient\n` +
+        `  ✓ Achats, ventes, cessions\n` +
+        `  ✓ Calculs fiscaux et TRI\n\n` +
+        `Seul le graphique « Tout l'historique » perdra les points anciens.\n\n` +
+        `Réversible via Ctrl+Z.`
+    )) return;
+
+    // Capture pour undo
+    if (typeof pushUndo === 'function') pushUndo(`Compaction historique (${_compactionYears} ans)`);
+
+    const result = compactAllHistories(_compactionYears);
+
+    // Persiste + mirror IDB + refresh
+    if (typeof saveToStorage === 'function') saveToStorage();
+    if (typeof forceIdbMirror === 'function') forceIdbMirror().catch(() => {});
+
+    // Invalide les caches dépendants (les sparklines et heatmaps peuvent
+    // référencer les points supprimés)
+    if (typeof _sparklineCache !== 'undefined' && _sparklineCache.clear) _sparklineCache.clear();
+
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+
+    // Toast de confirmation
+    if (typeof toastSuccess === 'function') {
+        toastSuccess(
+            'Compaction réussie',
+            `${result.pointsRemoved.toLocaleString('fr-FR')} point(s) supprimé(s) sur ${result.assetsAffected} actif(s) · Taille : ${formatBytes(result.beforeBytes)} → ${formatBytes(result.afterBytes)}`
+        );
+    }
+
+    // Rafraîchit l'aperçu (qui devrait maintenant être vide)
+    setTimeout(refreshCompactionPreview, 200);
+}
+
+// Expose l'API globalement
+window.onCompactionYearsChange = onCompactionYearsChange;
+window.refreshCompactionPreview = refreshCompactionPreview;
+window.applyCompaction = applyCompaction;

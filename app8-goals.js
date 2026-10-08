@@ -345,6 +345,9 @@ function renderGoalsTab() {
     } else {
         document.getElementById('goal-detail-wrap').classList.add('hidden');
     }
+
+    // Chantier 1.9 — rendu du panneau FIRE (indépendant des objectifs classiques)
+    if (typeof renderFirePanel === 'function') renderFirePanel();
 }
 
 // ---------------------------------------------------------------------
