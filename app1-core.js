@@ -1328,7 +1328,6 @@ function paperDelta(a, b, format = 'eur', lowerIsBetter = false) {
     if (lowerIsBetter) isWinA = !isWinA;
     return { txt, cls: isWinA ? 'text-emerald-400' : 'text-rose-400' };
 }
-}
 
 // --- UI scénarios : menu déroulant attaché au bouton Paper -------------
 function renderPaperScenarioMenu() {
