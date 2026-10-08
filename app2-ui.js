@@ -764,7 +764,9 @@ function computeAdvancedStats() {
     });
     const topPctEl = document.getElementById('inv-stat-top-pct');
     const topNameEl = document.getElementById('inv-stat-top-name');
-    if (topPctEl && topAsset) topPctEl.innerText = (totalValue > 0 ? (topVal / totalValue * 100) : 0).toFixed(1) + '%';
+    if (topPctEl) topPctEl.innerText = (topAsset && totalValue > 0)
+        ? (topVal / totalValue * 100).toFixed(1) + '%'
+        : '—';
     if (topNameEl) topNameEl.innerText = topAsset ? topAsset.name : '—';
 
     // Concentration HHI (indice de Herfindahl-Hirschman)
@@ -779,12 +781,12 @@ function computeAdvancedStats() {
     }
     const hhiEl = document.getElementById('inv-stat-hhi');
     const hhiLabelEl = document.getElementById('inv-stat-hhi-label');
-    if (hhiEl) hhiEl.innerText = Math.round(hhi);
+    if (hhiEl) hhiEl.innerText = totalValue > 0 ? Math.round(hhi) : '—';
     if (hhiLabelEl) {
         let label = '—';
-        if (hhi > 0 && hhi < 1500) label = 'Diversifié';
-        else if (hhi < 2500) label = 'Modérément concentré';
-        else if (hhi > 0) label = 'Très concentré';
+        if (hhi > 0 && hhi < 1500)       label = 'Diversifié';
+        else if (hhi >= 1500 && hhi < 2500) label = 'Modérément concentré';
+        else if (hhi >= 2500)            label = 'Très concentré';
         hhiLabelEl.innerText = label;
     }
 
@@ -810,9 +812,13 @@ function computeAdvancedStats() {
     });
     const oldestYearsEl = document.getElementById('inv-stat-oldest-years');
     const oldestNameEl  = document.getElementById('inv-stat-oldest-name');
-    if (oldestYearsEl && oldestDate) {
-        const years = (Date.now() - oldestDate.getTime()) / (1000 * 3600 * 24 * 365.25);
-        oldestYearsEl.innerText = years.toFixed(1) + ' ans';
+    if (oldestYearsEl) {
+        if (oldestDate) {
+            const years = (Date.now() - oldestDate.getTime()) / (1000 * 3600 * 24 * 365.25);
+            oldestYearsEl.innerText = years.toFixed(1) + ' ans';
+        } else {
+            oldestYearsEl.innerText = '—';
+        }
     }
     if (oldestNameEl) oldestNameEl.innerText = oldestAsset ? oldestAsset.name : '—';
 
@@ -849,7 +855,9 @@ function computeAdvancedStats() {
     cryptos.forEach(a => { if ((a.value || 0) > topCryptoVal) { topCryptoVal = a.value; topCrypto = a; } });
     const cryptoTopPctEl = document.getElementById('crypto-stat-top-pct');
     const cryptoTopNameEl = document.getElementById('crypto-stat-top-name');
-    if (cryptoTopPctEl && topCrypto) cryptoTopPctEl.innerText = (cryptoVal > 0 ? (topCryptoVal / cryptoVal * 100) : 0).toFixed(1) + '%';
+    if (cryptoTopPctEl) cryptoTopPctEl.innerText = (topCrypto && cryptoVal > 0)
+        ? (topCryptoVal / cryptoVal * 100).toFixed(1) + '%'
+        : '—';
     if (cryptoTopNameEl) cryptoTopNameEl.innerText = topCrypto ? topCrypto.name : '—';
 
     // --- 3) HORS-CADRAN ---

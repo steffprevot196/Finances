@@ -237,8 +237,99 @@ function renderAssetLotsTable(asset) {
             <td class="p-2.5 text-right ${remaining > 0 ? 'text-emerald-400 font-bold' : 'text-gray-500'}">${remaining}</td>
             <td class="p-2.5 text-right">${formatEUR(l.price)}</td>
             <td class="p-2.5 text-right text-gray-400">${formatEUR(l.frais || 0)}</td>
+            <td class="p-2.5 text-center whitespace-nowrap">
+                <button type="button" aria-label="Modifier ce lot" title="Modifier ce lot" onclick="event.stopPropagation(); openEditLotModal(${asset.id}, ${l.id})" class="inline-flex items-center justify-center w-7 h-7 rounded-md bg-gray-800/60 text-gray-300 hover:bg-emerald-900/60 hover:text-emerald-300 transition"><i class="fa-solid fa-pen"></i></button>
+                <button type="button" aria-label="Supprimer ce lot" title="Supprimer ce lot" onclick="event.stopPropagation(); deleteLot(${asset.id}, ${l.id})" class="inline-flex items-center justify-center w-7 h-7 rounded-md bg-gray-800/60 text-gray-300 hover:bg-rose-900/60 hover:text-rose-300 transition"><i class="fa-solid fa-trash"></i></button>
+            </td>
         </tr>`;
     }).join('');
+}
+
+// ---------------------------------------------------------------------
+// Édition / suppression d'un lot individuel (depuis le modal de détail actif)
+// ---------------------------------------------------------------------
+function openEditLotModal(assetId, lotId) {
+    const asset = assets.find(a => a.id === assetId);
+    if (!asset) return;
+    const lot = (asset.lots || []).find(l => l.id === lotId);
+    if (!lot) return;
+
+    document.getElementById('lot-edit-asset-id').value       = assetId;
+    document.getElementById('lot-edit-lot-id').value         = lotId;
+    document.getElementById('lot-edit-date').value           = lot.date || '';
+    document.getElementById('lot-edit-qty').value            = lot.qty;
+    document.getElementById('lot-edit-qty-remaining').value  = lot.qtyRemaining;
+    document.getElementById('lot-edit-price').value          = lot.price;
+    document.getElementById('lot-edit-frais').value          = lot.frais || 0;
+    document.getElementById('lot-edit-reference').value      = lot.reference || '';
+
+    document.getElementById('modal-edit-lot').classList.remove('hidden');
+}
+
+function handleEditLot(e) {
+    e.preventDefault();
+    const assetId = parseFloat(document.getElementById('lot-edit-asset-id').value);
+    const lotId   = parseFloat(document.getElementById('lot-edit-lot-id').value);
+    const asset   = assets.find(a => a.id === assetId);
+    if (!asset) return;
+    const lot = (asset.lots || []).find(l => l.id === lotId);
+    if (!lot) return;
+
+    const newQty        = parseFloat(document.getElementById('lot-edit-qty').value) || 0;
+    const newQtyRemain  = parseFloat(document.getElementById('lot-edit-qty-remaining').value) || 0;
+
+    if (newQtyRemain > newQty + 1e-9) {
+        alert('La quantité restante ne peut pas dépasser la quantité achetée.');
+        return;
+    }
+
+    lot.date         = document.getElementById('lot-edit-date').value;
+    lot.qty          = newQty;
+    lot.qtyRemaining = newQtyRemain;
+    lot.price        = parseFloat(document.getElementById('lot-edit-price').value) || 0;
+    lot.frais        = parseFloat(document.getElementById('lot-edit-frais').value) || 0;
+    lot.reference    = document.getElementById('lot-edit-reference').value.trim();
+
+    syncAssetFromLots(asset);
+    saveToStorage();
+    closeModal('modal-edit-lot');
+    refreshAllUI();
+    openAssetDetailModal(assetId); // rouvre le détail avec les données à jour
+}
+
+function deleteLot(assetId, lotId) {
+    const asset = assets.find(a => a.id === assetId);
+    if (!asset) return;
+    const lot = (asset.lots || []).find(l => l.id === lotId);
+    if (!lot) return;
+
+    const recap =
+        `Date : ${lot.date ? new Date(lot.date).toLocaleDateString('fr-FR') : '—'}\n` +
+        `Quantité achetée : ${lot.qty}\n` +
+        `Quantité restante : ${lot.qtyRemaining}\n` +
+        `Prix unitaire : ${formatEUR(lot.price)}` +
+        (lot.reference ? `\nRéférence : ${lot.reference}` : '');
+
+    if (!confirm(`Supprimer ce lot ?\n\n${recap}\n\nCette action est irréversible.`)) return;
+
+    asset.lots = (asset.lots || []).filter(l => l.id !== lotId);
+
+    if (asset.lots.length === 0) {
+        if (confirm(`Cet actif n'a plus aucun lot.\nSupprimer tout l'actif "${asset.name}" du portefeuille ?`)) {
+            assets = assets.filter(a => a.id !== assetId);
+            saveToStorage();
+            closeModal('modal-asset-detail');
+            refreshAllUI();
+            return;
+        }
+        // L'utilisateur garde l'actif → on lui laisse un lot vide pour éviter
+        // un état incohérent (qty = 0).
+    }
+
+    syncAssetFromLots(asset);
+    saveToStorage();
+    refreshAllUI();
+    openAssetDetailModal(assetId);
 }
 
 function renderAssetDetailChart(id) {

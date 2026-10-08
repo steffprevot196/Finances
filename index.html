@@ -1436,6 +1436,7 @@
                                     <th class="p-2.5 text-right">Qté restante</th>
                                     <th class="p-2.5 text-right">Prix unitaire</th>
                                     <th class="p-2.5 text-right">Frais</th>
+                                    <th class="p-2.5 text-center">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="modal-asset-lots-body" class="divide-y divide-gray-800/60 font-mono"></tbody>
@@ -1694,6 +1695,53 @@
                     </div>
                 </form>
             </div>
+        </div>
+    </div>
+
+    <!-- MODAL : ÉDITER UN LOT INDIVIDUEL -->
+    <div id="modal-edit-lot" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60] hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
+                <h3 class="font-bold text-white text-sm"><i class="fa-solid fa-pen text-emerald-400"></i> Modifier un lot</h3>
+                <button onclick="closeModal('modal-edit-lot')" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="handleEditLot(event)" class="p-4 space-y-3 text-xs">
+                <input type="hidden" id="lot-edit-asset-id">
+                <input type="hidden" id="lot-edit-lot-id">
+                <div>
+                    <label class="block text-gray-400 mb-1">Date d'achat *</label>
+                    <input type="date" id="lot-edit-date" required class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500">
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-gray-400 mb-1">Quantité achetée *</label>
+                        <input type="number" step="any" id="lot-edit-qty" required class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 mb-1">Qté restante *</label>
+                        <input type="number" step="any" id="lot-edit-qty-remaining" required class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                        <p class="text-[10px] text-gray-500 mt-1">Doit être ≤ Quantité achetée</p>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-gray-400 mb-1">Prix unitaire (€) *</label>
+                        <input type="number" step="any" id="lot-edit-price" required class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 mb-1">Frais (€)</label>
+                        <input type="number" step="any" id="lot-edit-frais" value="0" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-gray-400 mb-1">Référence / N° de série</label>
+                    <input type="text" id="lot-edit-reference" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                </div>
+                <div class="pt-2 flex justify-end gap-2 border-t border-gray-800">
+                    <button type="button" onclick="closeModal('modal-edit-lot')" class="px-4 py-2 rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700">Annuler</button>
+                    <button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium">Enregistrer le lot</button>
+                </div>
+            </form>
         </div>
     </div>
 
