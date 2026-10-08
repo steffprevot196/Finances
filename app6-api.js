@@ -945,6 +945,7 @@ function refreshAllUI() {
         // Chantier §3 — scoring ESG du portefeuille
         if (typeof renderEsgDashboardSection === 'function') renderEsgDashboardSection();
     }
+    // tab-accueil : uniquement les KPI banners — pas de graphique à initialiser
     else if (activeTab === 'tab-gave') initGaveDonutChart();
     else if (activeTab === 'tab-strategies' && typeof renderStrategiesTab === 'function') renderStrategiesTab();
     else if (activeTab === 'tab-objectifs' && typeof renderGoalsTab === 'function') {

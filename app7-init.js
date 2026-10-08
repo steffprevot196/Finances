@@ -595,7 +595,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // qu'une section devient visible (changement d'onglet, scroll), on
     // applique une animation d'apparition douce.
     const _revealSections = document.querySelectorAll(
-        '#tab-dashboard > div, #tab-inventaire > div, #tab-gave > div, ' +
+        '#tab-accueil > div, #tab-dashboard > div, #tab-inventaire > div, #tab-gave > div, ' +
         '#tab-crypto > div, #tab-hors-gave > div, #tab-piliers > div, ' +
         '#tab-annee-n1 > div, #tab-strategies > div, #tab-objectifs > div'
     );

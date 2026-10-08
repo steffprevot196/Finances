@@ -19,13 +19,14 @@
 // DÉFINITION DES ONGLETS
 // ---------------------------------------------------------------------
 const MOBILE_NAV_PRIMARY = [
-    { id: 'tab-dashboard',  icon: 'fa-house',            label: 'Accueil' },
+    { id: 'tab-accueil',    icon: 'fa-house',            label: 'Accueil' },
     { id: 'tab-inventaire', icon: 'fa-list-check',       label: 'Inv.' },
     { id: 'tab-gave',       icon: 'fa-compass',          label: 'Gave' },
     { id: 'tab-crypto',     icon: 'fa-bitcoin',          label: 'Crypto' }
 ];
 
 const MOBILE_NAV_SECONDARY = [
+    { id: 'tab-dashboard',  icon: 'fa-gauge-high',       label: 'Vue d\'ensemble', color: 'text-emerald-400' },
     { id: 'tab-hors-gave',  icon: 'fa-building-columns', label: 'Hors-Cadran',   color: 'text-blue-400' },
     { id: 'tab-piliers',    icon: 'fa-scale-balanced',   label: '3 Piliers',     color: 'text-cyan-400' },
     { id: 'tab-annee-n1',   icon: 'fa-receipt',          label: 'Fiscalité',     color: 'text-amber-400' },
@@ -264,7 +265,7 @@ function _attachSwipeListeners() {
 
         // Ordre complet des onglets (primaire + secondaire) pour le swipe
         const ORDER = [
-            'tab-dashboard', 'tab-inventaire', 'tab-gave', 'tab-crypto',
+            'tab-accueil', 'tab-dashboard', 'tab-inventaire', 'tab-gave', 'tab-crypto',
             'tab-hors-gave', 'tab-piliers', 'tab-annee-n1', 'tab-strategies',
             'tab-objectifs', 'tab-watchlist', 'tab-ledger'
         ];

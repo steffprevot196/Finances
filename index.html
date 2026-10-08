@@ -223,8 +223,11 @@
 
         <!-- NAVIGATION TABS -->
     <nav class="flex items-center gap-2 md:gap-6 border-b border-gray-800 mb-6 overflow-x-auto text-sm pb-1">
-        <button onclick="switchTab('tab-dashboard')" id="btn-tab-dashboard" class="nav-tab active py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
+        <button onclick="switchTab('tab-accueil')" id="btn-tab-accueil" class="nav-tab active py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
             <i class="fa-solid fa-house"></i> Accueil
+        </button>
+        <button onclick="switchTab('tab-dashboard')" id="btn-tab-dashboard" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
+            <i class="fa-solid fa-gauge-high"></i> Vue d'ensemble
         </button>
         <button onclick="switchTab('tab-inventaire')" id="btn-tab-inventaire" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
             <i class="fa-solid fa-list-check"></i> Inventaire
@@ -262,8 +265,8 @@
     <!-- MAIN CONTENT AREA -->
     <main class="flex-grow">
 
-        <!-- TAB 0 : ACCUEIL (KPI + Vue d'ensemble) -->
-        <section id="tab-dashboard" class="tab-content space-y-6">
+        <!-- TAB 0 : ACCUEIL (KPI synthèse — page d'atterrissage) -->
+        <section id="tab-accueil" class="tab-content space-y-6">
 
             <!-- KPI BANNER — Positions actuelles -->
             <div>
@@ -427,6 +430,10 @@
                     </div>
                 </div>
             </div>
+        </section>
+
+        <!-- TAB 1 : VUE D'ENSEMBLE (graphiques, analyses, scoring) -->
+        <section id="tab-dashboard" class="tab-content hidden space-y-6">
 
             <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div id="dashboard-alloc-card" class="lg:col-span-1 bg-gray-900/60 border border-gray-800 rounded-xl p-5 flex flex-col">

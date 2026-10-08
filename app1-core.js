@@ -146,7 +146,7 @@ let arbitrages   = readPortfolioArbitrages() || JSON.parse(JSON.stringify(defaul
 let taxRegimeMode = localStorage.getItem('patriMonial_taxMode') || 'PFU';
 let taxTMI        = parseFloat(localStorage.getItem('patriMonial_tmi')) || 0.30;
 let cessionFilter = 'ALL';
-let activeTab     = 'tab-dashboard';
+let activeTab     = 'tab-accueil';
 
 // Instances Chart.js (déclarées ici pour éviter la TDZ, cf. Correction 1)
 let dashboardAllocChartInstance   = null;
