@@ -54,6 +54,46 @@ async function fetchCoinGeckoHistory(coingeckoId, days = 365) {
     return (data.prices || []).map(([ts, price]) => ({ date: ts, price }));
 }
 
+// ---------------------------------------------------------------------
+// Yahoo Finance via proxy CORS public (allorigins.win)
+// Yahoo n'autorise pas les requêtes cross-origin directes, on passe par un
+// proxy gratuit qui relaie et ajoute l'en-tête Access-Control-Allow-Origin.
+// La Chart API Yahoo accepte les tickers suffixés (.L, .PA, .DE, .MU…).
+// ---------------------------------------------------------------------
+const YAHOO_PROXY = 'https://api.allorigins.win/raw?url=';
+
+function yahooChartUrl(symbol, range) {
+    return `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
+}
+
+// Prix de marché actuel (quote simple)
+async function fetchYahooQuote(symbol) {
+    try {
+        const res = await fetch(YAHOO_PROXY + encodeURIComponent(yahooChartUrl(symbol, '1d')));
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const meta = data?.chart?.result?.[0]?.meta;
+        return meta?.regularMarketPrice ?? null;
+    } catch (err) {
+        console.warn(`Yahoo quote failed for ${symbol}:`, err);
+        return null;
+    }
+}
+
+// Historique de prix (1 an par défaut) sous le même format que les autres sources
+async function fetchYahooHistory(symbol, days = 365) {
+    const range = days <= 30 ? '1mo' : days <= 90 ? '3mo' : days <= 180 ? '6mo' : days <= 365 ? '1y' : '2y';
+    const res = await fetch(YAHOO_PROXY + encodeURIComponent(yahooChartUrl(symbol, range)));
+    if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
+    const data = await res.json();
+    const result = data?.chart?.result?.[0];
+    if (!result?.timestamp || !result?.indicators?.quote?.[0]?.close) return [];
+    const closes = result.indicators.quote[0].close;
+    return result.timestamp
+        .map((ts, i) => ({ date: ts * 1000, price: closes[i] }))
+        .filter(p => Number.isFinite(p.price) && p.price > 0);
+}
+
 async function fetchFrankfurterHistory(currency, days = 365) {
     const end = new Date();
     const start = new Date(Date.now() - days * 864e5);
@@ -101,16 +141,36 @@ async function refreshRealPriceHistory() {
         } catch (err) { failed.push(ticker + ' (' + err.message + ')'); }
     }
 
+    // --- Actions / ETF via Yahoo Finance (proxy CORS) ---
+    // On stocke sous la clé EQUITY_<symbole> pour la reconnaître dans primeRealVolCache.
+    const equityAssets = assets.filter(a =>
+        (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto')
+    );
+    for (const a of equityAssets) {
+        const symbol = a.yahooTicker || a.ticker;
+        if (!symbol) continue;
+        const key = 'EQUITY_' + symbol.toUpperCase();
+        try {
+            const series = await fetchYahooHistory(symbol);
+            if (series.length < 30) {
+                failed.push(`${symbol} (données insuffisantes : ${series.length} points)`);
+                continue;
+            }
+            await priceDBSet(key, { updatedAt: Date.now(), series });
+            done++;
+        } catch (err) { failed.push(`${symbol} (${err.message})`); }
+        await new Promise(r => setTimeout(r, 200)); // courtoisie envers le proxy
+    }
+
     if (icon) icon.classList.remove('fa-spin');
     if (btn) btn.disabled = false;
 
     if (done === 0 && failed.length === 0) {
-        alert('Aucun actif Crypto ou Devise éligible trouvé (tickers supportés : ' +
-            Object.keys(CRYPTO_COINGECKO_IDS).join(', ') + ' / ' + CASH_CURRENCY_TICKERS.join(', ') + ').');
+        alert('Aucun actif éligible trouvé (Crypto, Devises, ou Actions/ETF avec ticker).');
     } else {
         alert(`Historique de prix réel mis à jour pour ${done} actif(s).` +
             (failed.length ? `\nÉchecs : ${failed.join(', ')}` : '') +
-            '\n\nActions/ETF/Obligations : non disponible depuis un navigateur (Yahoo Finance bloque les requêtes CORS) — le calcul de risque continue d\'utiliser l\'historique de valorisation de votre portefeuille pour ces actifs.');
+            '\n\nLe calcul de risque utilisera désormais les vrais cours pour ces actifs.');
     }
 
     // B5 : recharge le cache mémoire des volatilités réelles puis redessine.
@@ -144,6 +204,10 @@ function primeRealVolCache() {
         }
         if (hasTag(a, 'Devises/Liquidités') && CASH_CURRENCY_TICKERS.includes(a.ticker.toUpperCase())) {
             keys.push(['CUR_' + a.ticker.toUpperCase(), a.ticker.toUpperCase()]);
+        }
+        if ((hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto')) {
+            const sym = (a.yahooTicker || a.ticker || '').toUpperCase();
+            if (sym) keys.push(['EQUITY_' + sym, sym]);
         }
     });
     return Promise.all(keys.map(([k]) => priceDBGet(k).catch(() => null))).then(results => {
@@ -218,23 +282,37 @@ async function fetchLivePrices() {
         }
     } catch (err) { console.warn(err); }
 
-    // --- Actions / ETF (Finnhub) — DOIT s'exécuter AVANT les alertes ---
+    // --- Actions / ETF : Yahoo Finance via proxy CORS ---
+    // Finnhub ne couvre pas les places européennes (.L, .PA, .DE, .MU…), donc
+    // on utilise Yahoo en source principale (le ticker Yahoo est le même format
+    // que celui saisi dans le champ "Ticker Yahoo Finance").
     const updatedStockIds = new Set();
     const stockAssets = assets.filter(a => (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto'));
-    if (stockAssets.length && finnhubApiKey) {
+    if (stockAssets.length) {
         let stockUpdated = 0;
         for (const a of stockAssets) {
             const symbol = a.yahooTicker || a.ticker;
             if (!symbol) continue;
             try {
-                const price = await fetchFinnhubQuote(symbol);
+                let price = null;
+
+                // 1) Yahoo Finance (couvre les places européennes)
+                price = await fetchYahooQuote(symbol);
+
+                // 2) Fallback Finnhub si Yahoo échoue (souvent pour les US purs)
+                if (!price && finnhubApiKey) {
+                    price = await fetchFinnhubQuote(symbol);
+                }
+
                 if (price) {
                     a.value = a.qty * price;
                     upsertTodayHistoryPoint(a, a.value, a.invested);
                     stockUpdated++;
                     updatedStockIds.add(a.id);
+                } else {
+                    sourceErrors.push(`${a.name} (${symbol}) : aucun cours récupéré`);
                 }
-                await new Promise(r => setTimeout(r, 100));
+                await new Promise(r => setTimeout(r, 200)); // courtoisie proxy
             } catch (err) {
                 sourceErrors.push(`${a.name} (${symbol}) : ${err.message}`);
             }
