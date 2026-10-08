@@ -380,9 +380,13 @@ function _renderEsgTopFlop(list) {
 
     // Flop 3 (les 3 derniers, du plus mauvais au moins mauvais)
     const flop3 = scored.slice(-3).reverse();
-    // Évite les doublons si < 6 actifs
+    // Évite les doublons si < 6 actifs notés : dans ce cas, on retire du
+    // Flop les actifs déjà listés dans le Top pour ne pas afficher deux
+    // fois le même actif.
     if (scored.length < 6) {
-        flopEl.innerHTML = flop3.map(rowHTML).join('');
+        const topIds = new Set(top3.map(x => x.asset.id));
+        const deduped = flop3.filter(x => !topIds.has(x.asset.id));
+        flopEl.innerHTML = deduped.map(rowHTML).join('') || '<div class="text-gray-500 italic text-[11px] text-center py-3">—</div>';
     } else {
         // Vérifie qu'il n'y a pas de chevauchement avec le top
         const topIds = new Set(top3.map(x => x.asset.id));

@@ -7,17 +7,24 @@
 // ---------------------------------------------------------------------
 // IndexedDB pour le cache d'historique de prix réel
 // ---------------------------------------------------------------------
+// Version UNIFIÉE pour la DB partagée par tous les stores (prix, FX, appData).
+// Toute ouverture doit utiliser cette constante pour éviter les VersionError.
 const PRICE_DB_NAME  = 'patriMonialPriceHistory';
+const PRICE_DB_VERSION = 3;
 const PRICE_DB_STORE = 'series';
 
+// Ouvre la DB unifiée en s'assurant que TOUS les stores existent,
+// quel que soit l'appelant. Idempotent : peut être appelé en parallèle
+// sans risque de conflit de version.
 function openPriceDB() {
     return new Promise((resolve, reject) => {
         if (!window.indexedDB) { reject(new Error('IndexedDB indisponible dans ce navigateur.')); return; }
-        const req = indexedDB.open(PRICE_DB_NAME, 1);
+        const req = indexedDB.open(PRICE_DB_NAME, PRICE_DB_VERSION);
         req.onupgradeneeded = () => {
-            if (!req.result.objectStoreNames.contains(PRICE_DB_STORE)) {
-                req.result.createObjectStore(PRICE_DB_STORE);
-            }
+            const db = req.result;
+            if (!db.objectStoreNames.contains(PRICE_DB_STORE))    db.createObjectStore(PRICE_DB_STORE);
+            if (!db.objectStoreNames.contains('fxRates'))         db.createObjectStore('fxRates');
+            if (!db.objectStoreNames.contains('appData'))         db.createObjectStore('appData');
         };
         req.onsuccess = () => resolve(req.result);
         req.onerror   = () => reject(req.error);
@@ -314,25 +321,11 @@ function _fxCacheKey(currency, dateISO) {
 
 // Ouvre (et crée si besoin) le store IndexedDB pour les taux de change.
 // On utilise le même nom de DB que les séries de prix, mais un store dédié.
-const FX_DB_NAME  = 'patriMonialPriceHistory';
 const FX_DB_STORE = 'fxRates';
 
+// Délègue à openPriceDB (DB partagée). Alias conservé pour compat.
 function openFxDB() {
-    return new Promise((resolve, reject) => {
-        if (!window.indexedDB) { reject(new Error('IndexedDB indisponible.')); return; }
-        const req = indexedDB.open(FX_DB_NAME, 2);  // version 2 pour ajouter le store
-        req.onupgradeneeded = () => {
-            const db = req.result;
-            if (!db.objectStoreNames.contains(PRICE_DB_STORE)) {
-                db.createObjectStore(PRICE_DB_STORE);
-            }
-            if (!db.objectStoreNames.contains(FX_DB_STORE)) {
-                db.createObjectStore(FX_DB_STORE);
-            }
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror   = () => reject(req.error);
-    });
+    return openPriceDB();
 }
 
 async function fxDBGet(key) {
@@ -555,10 +548,10 @@ async function refreshRealPriceHistory() {
         } catch (err) { failed.push(ticker + ' (' + err.message + ')'); }
     }
 
-        // --- Actions / ETF via Twelve Data (fallback Yahoo si non configuré) ---
-        const equityAssets = assets.filter(a =>
-            (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto')
-        );
+    // --- Actions / ETF via Twelve Data (fallback Yahoo si non configuré) ---
+    const equityAssets = assets.filter(a =>
+        (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto')
+    );
     
         const showToast = equityAssets.length > 1;
         if (showToast) {

@@ -740,8 +740,10 @@ _suite('_cw8PriceAt');
     const p1 = _cw8PriceAt(new Date('2024-02-01'));
     assertEq(p1, 110, '_cw8PriceAt : date exacte → cours exact');
 
-    // Cas 2 : date intermédiaire → utilise le dernier point ≤ date
-    const p2 = _cw8PriceAt(new Date('2024-02-15'));
+    // Cas 2 : date intermédiaire (dans la tolérance 7 jours) → forward-fill
+    // Note : 2024-02-15 aurait dépassé la tolérance de 7j et renvoyé null
+    // (voir Cas 5 qui teste précisément ce cas), d'où l'usage du 05/02.
+    const p2 = _cw8PriceAt(new Date('2024-02-05'));
     assertEq(p2, 110, '_cw8PriceAt : date intermédiaire → forward-fill');
 
     // Cas 3 : date antérieure à tous les points → null
@@ -791,11 +793,23 @@ _suite('computeCw8Comparison');
     // -----------------------------------------------------------------
     // Cas 2 : portefeuille vide → null
     // -----------------------------------------------------------------
-    benchmarkSeriesCache = [
-        { date: new Date('2023-01-01').getTime(), price: 400 },
-        { date: new Date('2024-01-01').getTime(), price: 500 },
-        { date: new Date('2025-01-01').getTime(), price: 600 }
-    ];
+    // Benchmark réaliste : computeCw8Comparison() exige au moins 30 points.
+    // Les 3 dates clés (01/01/2023, 01/01/2024, 01/01/2025) portent les
+    // prix 400 / 500 / 600 utilisés par les assertions plus bas ; les 30
+    // points « filler » placés AVANT 2023-01-01 satisfont la contrainte de
+    // longueur sans interférer avec les calculs de flux (ils ne sont pas
+    // candidats pour _cw8PriceAt aux dates des flux, qui matchent
+    // exactement les 3 dates clés).
+    benchmarkSeriesCache = [];
+    for (let i = 30; i >= 1; i--) {
+        const d = new Date('2023-01-01');
+        d.setDate(d.getDate() - i * 10);
+        benchmarkSeriesCache.push({ date: d.getTime(), price: 380 + i });
+    }
+    benchmarkSeriesCache.push({ date: new Date('2023-01-01').getTime(), price: 400 });
+    benchmarkSeriesCache.push({ date: new Date('2024-01-01').getTime(), price: 500 });
+    benchmarkSeriesCache.push({ date: new Date('2025-01-01').getTime(), price: 600 });
+
     assets.length = 0;
     assertNull(computeCw8Comparison(), 'computeCw8Comparison : portefeuille vide → null');
 
@@ -1210,22 +1224,12 @@ _suite('computePerProjection');
 // LANCEUR
 // ---------------------------------------------------------------------
 function runTests(options = {}) {
-    // Réinitialise les résultats
-    _testResults.length = 0;
-
+    // Les IIFE de test se sont déjà exécutées au chargement de ce fichier
+    // (elles sont auto-invoquées). Leurs résultats sont déjà présents dans
+    // _testResults : on ne fait ici que mesurer le temps de formatage et
+    // afficher le rapport. On ne vide PAS _testResults, sinon tous les
+    // résultats accumulés par les IIFE seraient perdus.
     const t0 = performance.now();
-
-    // Les tests s'exécutent ICI — la lecture du fichier déclenche les IIFE
-    // ci-dessus. Pour les relancer, on recharge dynamiquement les fonctions.
-    // En pratique, runTests() est appelé après le chargement complet : les
-    // IIFE ont déjà tourné une fois. On exécute une seconde passe pour
-    // capturer un résultat propre.
-    // ⚠ Les IIFE ont déjà rempli _testResults une première fois : on la
-    // vide à nouveau et on relance via une fonction dédiée.
-
-    // Ré-exécution propre
-    _testResults.length = 0;
-    _runAllTests();
 
     const durationMs = Math.round(performance.now() - t0);
     const total = _testResults.length;
@@ -1268,24 +1272,7 @@ function runTests(options = {}) {
 }
 
 // Regroupe tous les tests pour permettre la ré-exécution
-function _runAllTests() {
-    // Chaque IIFE de test s'exécute au chargement du fichier. Pour une
-    // ré-exécution dynamique, on les rappelle ici via une liste.
-    // Approche pragmatique : on relance les tests en ré-affectant les
-    // résultats depuis les closures déjà exécutées. En pratique, la
-    // première exécution suffit pour valider l'état du code.
 
-    // Solution : les IIFE sont auto-exécutées au chargement. runTests()
-    // ré-affiche simplement les résultats. Pour relancer vraiment les tests
-    // (par exemple après un hot-reload), il faudrait recharger ce fichier.
-    // C'est un compromis acceptable pour un mini-framework autonome.
-
-    // Pour bénéficier d'une vraie ré-exécution, on expose les tests sous
-    // forme de fonctions qu'on peut rappeler :
-    if (typeof _allTestFunctions !== 'undefined' && Array.isArray(_allTestFunctions)) {
-        _allTestFunctions.forEach(fn => { try { fn(); } catch (e) { console.warn('[Tests] Erreur :', e); } });
-    }
-}
 
 // Expose l'API globalement
 window.runTests = runTests;

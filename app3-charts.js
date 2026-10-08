@@ -298,7 +298,11 @@ function renderDashboardTreemap() {
         const weight = grandTotal > 0 ? (item.value / grandTotal) * 100 : 0;
         const isPos  = item.pnlPct >= 0;
 
-        const tooltip = `${item.name}&#10;${formatEUR(item.value)} · ${weight.toFixed(1)} % du portefeuille&#10;P&L : ${isPos ? '+' : ''}${item.pnlPct.toFixed(2)} %`;
+        // item.name peut contenir <, >, & (issus d'une saisie libre ou d'un
+        // import CSV/JSON). Le <title> SVG est interprété comme du XML
+        // strict : on doit échapper le nom pour éviter un SVG cassé ou une
+        // injection XML.
+        const tooltip = `${escapeHTML(item.name)}&#10;${formatEUR(item.value)} · ${weight.toFixed(1)} % du portefeuille&#10;P&L : ${isPos ? '+' : ''}${item.pnlPct.toFixed(2)} %`;
 
         // Rectangle cliquable avec effet hover
         html += `<g class="cursor-pointer" onclick="openAssetDetailModal(${item.id})">

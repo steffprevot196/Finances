@@ -379,7 +379,9 @@ async function _autoFillFxRate(currency, dateISO) {
 // ---------------------------------------------------------------------
 // VALIDATION DE COHÉRENCE (Partie 5)
 // ---------------------------------------------------------------------
-function validateAssetCoherence(fields) {
+// currentId : id de l'actif en cours d'édition (null en création).
+// Permet d'exclure l'actif lui-même de la détection de doublon ISIN.
+function validateAssetCoherence(fields, currentId = null) {
     const warnings = [];
     if (fields.cadrans.primary === 'CRYPTO' && !fields.categories.includes('Crypto'))
         warnings.push('Le cadran "Cryptomonnaies" est sélectionné mais le tag "Crypto" est absent.');
@@ -390,7 +392,7 @@ function validateAssetCoherence(fields) {
     if (fields.isin && !/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(fields.isin))
         warnings.push("Le format de l'ISIN est invalide (2 lettres + 9 alphanum + 1 chiffre).");
     if (fields.isin) {
-        const duplicate = assets.find(a => a.isin === fields.isin && a.id !== fields.id);
+        const duplicate = assets.find(a => a.isin === fields.isin && a.id !== currentId);
         if (duplicate) warnings.push(`Un actif avec cet ISIN existe déjà : ${duplicate.name}.`);
     }
     return warnings;
@@ -478,7 +480,7 @@ function handleAddAsset(e) {
         esgScore:         esgScore   // null = utilise le catalogue automatique
     };
 
-        if (editId) {
+    if (editId) {
         const asset = assets.find(a => a.id === parseFloat(editId));
         if (asset) {
             Object.assign(asset, fields);
@@ -591,7 +593,7 @@ function handleAddAsset(e) {
     }
 
 
-    const warnings = validateAssetCoherence(fields);
+    const warnings = validateAssetCoherence(fields, editId ? parseFloat(editId) : null);
     if (warnings.length && !confirm('Avertissements :\n\n' + warnings.join('\n') + '\n\nContinuer quand même ?')) {
         return;
     }

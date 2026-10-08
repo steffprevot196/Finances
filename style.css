@@ -65,106 +65,106 @@ h1 { letter-spacing: -0.02em; }
    rempli au moment du clic sur « Exporter en PDF », puis le
    navigateur bascule en mode impression (only print visible).
    ============================================================ */
-   #print-fiscal-recap { display: none; }
+#print-fiscal-recap { display: none; }
 
-   @media print {
-       /* Masque tout le reste de l'app */
-       body > *:not(#print-fiscal-recap) { display: none !important; }
-       body {
-           background: #ffffff !important;
-           color: #111827 !important;
-           padding: 0 !important;
-           margin: 0 !important;
-           min-height: 0 !important;
-       }
-       /* Affiche uniquement le container de print */
-       #print-fiscal-recap { display: block !important; }
-   
-       @page {
-           size: A4;
-           margin: 14mm 13mm;
-       }
-   
-       .pdf-page  { page-break-after: always; }
-       .pdf-page:last-child { page-break-after: auto; }
-       .pdf-section { page-break-inside: avoid; }
-   }
-   
-   #print-fiscal-recap {
-       color: #111827;
-       background: #ffffff;
-       font-family: 'Inter', system-ui, -apple-system, sans-serif;
-       padding: 0;
-       width: 100%;
-       line-height: 1.4;
-   }
-   #print-fiscal-recap .pdf-header {
-       display: flex; align-items: center; justify-content: space-between;
-       border-bottom: 3px solid #0f766e;
-       padding-bottom: 10px; margin-bottom: 16px;
-   }
-   #print-fiscal-recap .pdf-logo {
-       width: 44px; height: 44px; border-radius: 10px;
-       background: linear-gradient(135deg, #0f766e, #14b8a6);
-       color: #fff; display: flex; align-items: center; justify-content: center;
-       font-size: 22px; font-weight: 700; flex-shrink: 0;
-   }
-   #print-fiscal-recap h1 { font-size: 18px; margin: 0; color: #0f172a; }
-   #print-fiscal-recap h2 {
-       font-size: 12px; margin: 16px 0 8px;
-       padding: 5px 8px; background: #f3f4f6;
-       border-left: 4px solid #0f766e;
-       color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px;
-   }
-   #print-fiscal-recap table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
-   #print-fiscal-recap th {
-       background: #0f172a; color: #fff; padding: 6px 7px;
-       text-align: left; font-size: 9.5px;
-       text-transform: uppercase; letter-spacing: 0.3px;
-   }
-   #print-fiscal-recap td {
-       padding: 5px 7px;
-       border-bottom: 1px solid #e5e7eb;
-       color: #1f2937; vertical-align: top;
-   }
-   #print-fiscal-recap tr:nth-child(even) td { background: #f9fafb; }
-   #print-fiscal-recap .pdf-num {
-       text-align: right;
-       font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
-       white-space: nowrap;
-   }
-   #print-fiscal-recap .pdf-kpi-grid {
-       display: grid; grid-template-columns: repeat(4, 1fr);
-       gap: 8px; margin-bottom: 10px;
-   }
-   #print-fiscal-recap .pdf-kpi {
-       border: 1px solid #e5e7eb; border-radius: 6px;
-       padding: 8px 10px; background: #f9fafb;
-   }
-   #print-fiscal-recap .pdf-kpi .label {
-       font-size: 9px; text-transform: uppercase;
-       color: #6b7280; letter-spacing: 0.4px;
-   }
-   #print-fiscal-recap .pdf-kpi .value {
-       font-size: 15px; font-weight: 700; color: #0f172a;
-       font-family: ui-monospace, monospace; margin-top: 2px;
-   }
-   #print-fiscal-recap .pdf-kpi.accent .value   { color: #b45309; }
-   #print-fiscal-recap .pdf-kpi.positive .value { color: #047857; }
-   #print-fiscal-recap .pdf-kpi.negative .value { color: #be123c; }
-   #print-fiscal-recap .pdf-total-row td {
-       font-weight: 700; background: #ecfdf5 !important;
-       color: #065f46; border-top: 2px solid #0f766e;
-   }
-   #print-fiscal-recap .pdf-footer {
-       margin-top: 22px; padding-top: 10px;
-       border-top: 1px solid #d1d5db;
-       font-size: 9px; color: #6b7280; line-height: 1.5;
-   }
-   #print-fiscal-recap .pdf-meta {
-       font-size: 10px; color: #4b5563;
-       text-align: right; line-height: 1.5;
-   }
+@media print {
+    /* Masque tout le reste de l'app */
+    body > *:not(#print-fiscal-recap) { display: none !important; }
+    body {
+        background: #ffffff !important;
+        color: #111827 !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        min-height: 0 !important;
+    }
+    /* Affiche uniquement le container de print */
+    #print-fiscal-recap { display: block !important; }
+
+    @page {
+        size: A4;
+        margin: 14mm 13mm;
+    }
+
+    .pdf-page  { page-break-after: always; }
+    .pdf-page:last-child { page-break-after: auto; }
+    .pdf-section { page-break-inside: avoid; }
+}
+
+#print-fiscal-recap {
+    color: #111827;
+    background: #ffffff;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    padding: 0;
+    width: 100%;
+    line-height: 1.4;
+}
+#print-fiscal-recap .pdf-header {
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 3px solid #0f766e;
+    padding-bottom: 10px; margin-bottom: 16px;
+}
+#print-fiscal-recap .pdf-logo {
+    width: 44px; height: 44px; border-radius: 10px;
+    background: linear-gradient(135deg, #0f766e, #14b8a6);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; flex-shrink: 0;
+}
+#print-fiscal-recap h1 { font-size: 18px; margin: 0; color: #0f172a; }
+#print-fiscal-recap h2 {
+    font-size: 12px; margin: 16px 0 8px;
+    padding: 5px 8px; background: #f3f4f6;
+    border-left: 4px solid #0f766e;
+    color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px;
+}
+#print-fiscal-recap table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+#print-fiscal-recap th {
+    background: #0f172a; color: #fff; padding: 6px 7px;
+    text-align: left; font-size: 9.5px;
+    text-transform: uppercase; letter-spacing: 0.3px;
+}
+#print-fiscal-recap td {
+    padding: 5px 7px;
+    border-bottom: 1px solid #e5e7eb;
+    color: #1f2937; vertical-align: top;
+}
+#print-fiscal-recap tr:nth-child(even) td { background: #f9fafb; }
+#print-fiscal-recap .pdf-num {
+    text-align: right;
+    font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+    white-space: nowrap;
+}
+#print-fiscal-recap .pdf-kpi-grid {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 8px; margin-bottom: 10px;
+}
+#print-fiscal-recap .pdf-kpi {
+    border: 1px solid #e5e7eb; border-radius: 6px;
+    padding: 8px 10px; background: #f9fafb;
+}
+#print-fiscal-recap .pdf-kpi .label {
+    font-size: 9px; text-transform: uppercase;
+    color: #6b7280; letter-spacing: 0.4px;
+}
+#print-fiscal-recap .pdf-kpi .value {
+    font-size: 15px; font-weight: 700; color: #0f172a;
+    font-family: ui-monospace, monospace; margin-top: 2px;
+}
+#print-fiscal-recap .pdf-kpi.accent .value   { color: #b45309; }
+#print-fiscal-recap .pdf-kpi.positive .value { color: #047857; }
+#print-fiscal-recap .pdf-kpi.negative .value { color: #be123c; }
+#print-fiscal-recap .pdf-total-row td {
+    font-weight: 700; background: #ecfdf5 !important;
+    color: #065f46; border-top: 2px solid #0f766e;
+}
+#print-fiscal-recap .pdf-footer {
+    margin-top: 22px; padding-top: 10px;
+    border-top: 1px solid #d1d5db;
+    font-size: 9px; color: #6b7280; line-height: 1.5;
+}
+#print-fiscal-recap .pdf-meta {
+    font-size: 10px; color: #4b5563;
+    text-align: right; line-height: 1.5;
+}
 
 
 
@@ -550,10 +550,10 @@ body.light .bg-gray-900\/80 {
    porte la classe `.density-compact`. Ne touche jamais aux
    polices ni aux couleurs — uniquement aux espacements.
 
-   Approche : ciblage par sélecteurs d'attributs pour éviter
-   d'avoir à renommer des milliers de classes Tailwind dans le
-   HTML. Les règles ont une spécificité plus élevée grâce à
-   la classe body, donc elles gagnent sans !important.
+   Approche : ciblage direct des classes Tailwind utilitaires
+   (`.p-6`, `.p-5`, `.gap-4`, etc.) pour rester robuste et
+   prédictible. Le préfixe `body.density-compact` augmente la
+   spécificité et garantit la victoire sur les règles Tailwind.
    ============================================================ */
 
 body.density-compact {
@@ -576,66 +576,48 @@ body.density-compact table tbody tr {
     line-height: 1.25;
 }
 
-/* --- Cartes de KPI / panneaux : padding réduit --- */
-body.density-compact .bg-gray-900\/60,
-body.density-compact .bg-gray-900\/80,
-body.density-compact .bg-gray-950\/60,
-body.density-compact .bg-gray-950\/40 {
-    /* Padding horizontal + vertical réduits de ~30 % */
-    /* On cible via un attribut "class" contenant p-4, p-5, p-6 */
-}
-
-/* Ciblage explicite des classes de padding Tailwind les plus courantes */
-body.density-compact [class*=" p-6"],
-body.density-compact [class^="p-6"] {
+/* --- Ciblage explicite des classes de padding Tailwind --- */
+body.density-compact .p-6 {
     padding: 1rem !important;   /* au lieu de 1.5rem (p-6 = 24px) */
 }
-body.density-compact [class*=" p-5"],
-body.density-compact [class^="p-5"] {
+body.density-compact .p-5 {
     padding: 0.875rem !important;   /* au lieu de 1.25rem (p-5 = 20px) */
 }
-body.density-compact [class*=" p-4"],
-body.density-compact [class^="p-4"] {
+body.density-compact .p-4 {
     padding: 0.625rem !important;   /* au lieu de 1rem (p-4 = 16px) */
 }
-body.density-compact [class*=" p-3"],
-body.density-compact [class^="p-3"] {
+body.density-compact .p-3 {
     padding: 0.4375rem !important;   /* au lieu de 0.75rem (p-3 = 12px) */
 }
-body.density-compact [class*=" p-2.5"],
-body.density-compact [class^="p-2.5"] {
+body.density-compact .p-2\.5 {
     padding: 0.3125rem !important;   /* au lieu de 0.625rem (p-2.5 = 10px) */
 }
-body.density-compact [class*=" p-2"],
-body.density-compact [class^="p-2"] {
+body.density-compact .p-2 {
     padding: 0.25rem !important;   /* au lieu de 0.5rem (p-2 = 8px) */
 }
 
 /* --- Gaps des grilles et flex containers --- */
-body.density-compact [class*=" gap-4"],
-body.density-compact [class^="gap-4"] {
+body.density-compact .gap-4 {
     gap: 0.625rem !important;   /* au lieu de 1rem */
 }
-body.density-compact [class*=" gap-3"],
-body.density-compact [class^="gap-3"] {
+body.density-compact .gap-3 {
     gap: 0.4375rem !important;   /* au lieu de 0.75rem */
 }
-body.density-compact [class*=" gap-2"],
-body.density-compact [class^="gap-2"] {
+body.density-compact .gap-2 {
     gap: 0.3125rem !important;   /* au lieu de 0.5rem */
 }
 
 /* --- Espaces verticaux entre les blocs --- */
-body.density-compact [class*=" space-y-6"] > * + * {
+body.density-compact .space-y-6 > * + * {
     margin-top: 1rem !important;   /* au lieu de 1.5rem */
 }
-body.density-compact [class*=" space-y-4"] > * + * {
+body.density-compact .space-y-4 > * + * {
     margin-top: 0.625rem !important;   /* au lieu de 1rem */
 }
-body.density-compact [class*=" space-y-3"] > * + * {
+body.density-compact .space-y-3 > * + * {
     margin-top: 0.4375rem !important;   /* au lieu de 0.75rem */
 }
-body.density-compact [class*=" space-y-2"] > * + * {
+body.density-compact .space-y-2 > * + * {
     margin-top: 0.3125rem !important;   /* au lieu de 0.5rem */
 }
 
@@ -652,25 +634,12 @@ body.density-compact textarea {
     padding-bottom: 0.3rem;
 }
 
-/* --- Sécurité : ne pas compacter les boutons du header ni les modals --- */
-body.density-compact header button,
-body.density-compact nav button,
-body.density-compact [id^="modal-"] {
-    /* Les modals et la navigation gardent leur padding d'origine */
-}
-
 /* --- Compensation sur les cartes très visuelles (KPI, dashboard) ---
        Le mode compact reste lisible : on remet un padding minimum
        sur les cards signature pour ne pas casser la hiérarchie. */
 body.density-compact #tab-dashboard .bg-gray-900\/60 > .text-2xl,
 body.density-compact #tab-dashboard .bg-gray-900\/80 > .text-2xl {
     margin-bottom: 0.25rem;
-}
-
-/* --- Les tableaux scrollables gardent une hauteur max raisonnable --- */
-body.density-compact .overflow-x-auto {
-    /* Pas de changement, juste un rappel : la densité n'affecte
-       pas le scroll horizontal */
 }
 
 
@@ -881,7 +850,7 @@ body.density-compact #mobile-bottom-nav i {
     font-size: 16px;   /* au lieu de 18px */
 }
 
-body.density-compact #mobile-bottom-nav .text-\\[10px\\] {
+body.density-compact #mobile-bottom-nav .text-\[10px\] {
     font-size: 9px;
 }
 

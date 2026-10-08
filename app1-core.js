@@ -2426,25 +2426,17 @@ window.HISTORY_COMPACTION_YEARS_DEFAULT = HISTORY_COMPACTION_YEARS_DEFAULT;
 // ancien, mode privé Firefox), tout fonctionne comme avant.
 // =====================================================================
 
-const APPDATA_DB_NAME  = 'patriMonialPriceHistory';   // même DB que les prix
-const APPDATA_DB_VERSION = 3;                          // v3 = ajout du store appData
 const APPDATA_DB_STORE = 'appData';
 
-// Ouvre la DB unifiée avec les 3 stores (priceHistory, fxRates, appData).
-// Les upgrades sont idempotents (test `contains` avant `createObjectStore`).
+// Délègue à openPriceDB (DB partagée). Alias conservé pour compat.
+// ⚠ openPriceDB est définie dans app6-api.js qui charge APRÈS app1-core.js.
+//    Comme openAppDataDB n'est appelée qu'au RUNTIME (jamais au chargement),
+//    la fonction est disponible au moment de l'appel.
 function openAppDataDB() {
-    return new Promise((resolve, reject) => {
-        if (!window.indexedDB) { reject(new Error('IndexedDB indisponible.')); return; }
-        const req = indexedDB.open(APPDATA_DB_NAME, APPDATA_DB_VERSION);
-        req.onupgradeneeded = () => {
-            const db = req.result;
-            if (!db.objectStoreNames.contains('series'))    db.createObjectStore('series');
-            if (!db.objectStoreNames.contains('fxRates'))   db.createObjectStore('fxRates');
-            if (!db.objectStoreNames.contains(APPDATA_DB_STORE)) db.createObjectStore(APPDATA_DB_STORE);
-        };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror   = () => reject(req.error);
-    });
+    if (typeof openPriceDB !== 'function') {
+        return Promise.reject(new Error('openPriceDB indisponible — app6-api.js non chargé.'));
+    }
+    return openPriceDB();
 }
 
 async function appDBGet(key) {
