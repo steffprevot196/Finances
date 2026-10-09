@@ -453,7 +453,7 @@ function renderInventoryTable(filterCat = inventoryFilter, searchQuery) {
                 <div class="flex items-center gap-1.5 min-w-0">
                     ${assetClassIconHTML(asset)}
                     <div class="min-w-0 flex-1">
-                        <div class="font-bold text-white truncate" title="${escapeHTML(asset.name)}">${escapeHTML(asset.name)}${sessionBadgeHTML('asset', asset.id)}${concentrationBadgeHTML(asset)}${paperBadgeHTML(asset)}</div>
+                        <div class="font-bold text-white truncate" title="${escapeHTML(asset.name)}">${escapeHTML(asset.name)}${sessionBadgeHTML('asset', asset.id)}${concentrationBadgeHTML(asset)}${paperBadgeHTML(asset)}${typeof thesisBadgeHTML === 'function' ? thesisBadgeHTML(asset) : ''}</div>
                         <div class="text-[10px] text-gray-500 font-mono truncate">${assetSubtitleHTML(asset)}</div>
                     </div>
                 </div>
@@ -581,7 +581,7 @@ function renderCryptoTable() {
                     ${assetClassIconHTML(a)}
                     <div class="min-w-0 flex-1">
                     
-                                    <div class="font-bold text-white truncate">${escapeHTML(a.name)}${sessionBadgeHTML('asset', a.id)}${concentrationBadgeHTML(a)}${paperBadgeHTML(a)}</div>
+                                    <div class="font-bold text-white truncate">${escapeHTML(a.name)}${sessionBadgeHTML('asset', a.id)}${concentrationBadgeHTML(a)}${paperBadgeHTML(a)}${typeof thesisBadgeHTML === 'function' ? thesisBadgeHTML(a) : ''}</div>
                 <div class="text-[10px] text-gray-500 font-mono">${escapeHTML(a.ticker)}</div>
             </div>
         </div>
@@ -1377,8 +1377,78 @@ function getCommandList() {
         { label: 'Objectifs & Projections',        hint: 'Onglet 9 — Monte-Carlo patrimoine',      icon: 'fa-bullseye',            category: 'Navigation', run: () => switchTab('tab-objectifs') },
         { label: 'Nouvel objectif patrimonial',    hint: 'Définir un objectif chiffré',            icon: 'fa-plus',                category: 'Action',     run: () => openAddGoalModal() },
         { label: 'Comparateur de segments',       hint: 'Activer / fermer la comparaison',        icon: 'fa-code-compare',        category: 'Navigation', run: () => { switchTab('tab-dashboard'); toggleCompareMode(); } },
-        { label: 'Simulateur de vente',           hint: "« Et si je vendais X ? » (ouvre le 1ᵉʳ actif)", icon: 'fa-flask',          category: 'Fiscalité',  run: () => { if (assets.length) openSellSimulator(assets[0].id); else alert('Aucun actif à simuler.'); } }
+        { label: 'Simulateur de vente',           hint: "« Et si je vendais X ? » (ouvre le 1ᵉʳ actif)", icon: 'fa-flask',          category: 'Fiscalité',  run: () => { if (assets.length) openSellSimulator(assets[0].id); else alert('Aucun actif à simuler.'); } },
+        { label: 'Voir le rapport mensuel',       hint: 'Historique MoM / YoY de la performance',         icon: 'fa-calendar-check', category: 'Navigation', run: () => { switchTab('tab-dashboard'); setTimeout(() => { const el = document.getElementById('monthly-history-table-wrap'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 100); } },
+        { label: 'Créer un snapshot manuellement', hint: 'Archiver la performance du mois en cours',      icon: 'fa-camera',         category: 'Action',     run: () => { if (typeof captureMonthlySnapshot === 'function') { captureMonthlySnapshot(); renderMonthlySnapshotsSection(); if (typeof toastSuccess === 'function') toastSuccess('Snapshot créé', 'Performance du mois en cours archivée.'); } } },
+        { label: 'Voir la matrice de corrélation', hint: 'Détecter les concentrations cachées entre actifs', icon: 'fa-diagram-project', category: 'Navigation', run: () => { switchTab('tab-dashboard'); setTimeout(() => { const el = document.getElementById('correlationHeatmapSvg'); if (el && el.parentElement) el.parentElement.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100); } },
+        { label: 'Recalculer la matrice de corrélation', hint: 'Forcer un recalcul sur les cours réels', icon: 'fa-arrows-rotate', category: 'Action', run: () => { if (typeof invalidateCorrelationCache === 'function') { invalidateCorrelationCache(); renderCorrelationSection(); if (typeof toastInfo === 'function') toastInfo('Matrice recalculée', 'Les corrélations ont été mises à jour.'); } } },
+        { label: 'Configurer le DCA planifié', hint: 'Rappel mensuel + suggestion de cadran', icon: 'fa-coins', category: 'Action', run: () => { if (typeof openDcaConfigModal === 'function') openDcaConfigModal(); else alert('Module DCA non chargé.'); } },
+        { label: (typeof dcaConfig !== 'undefined' && dcaConfig.enabled ? 'Désactiver' : 'Activer') + ' le DCA planifié', hint: 'Rappels automatiques mensuels', icon: (typeof dcaConfig !== 'undefined' && dcaConfig.enabled) ? 'fa-pause' : 'fa-play', category: 'Action', run: () => { if (typeof toggleDcaEnabled === 'function') toggleDcaEnabled(); else alert('Module DCA non chargé.'); } },
+        { label: 'DCA — Enregistrer l\'achat maintenant', hint: 'Ouvre le formulaire pré-rempli avec la suggestion en cours', icon: 'fa-plus-circle', category: 'Action', run: () => { if (typeof openDcaQuickAdd === 'function') openDcaQuickAdd(); else alert('Module DCA non chargé.'); } },
+        { label: 'Voir le waterfall du P&L', hint: 'Décomposition du P&L par actif', icon: 'fa-chart-column', category: 'Navigation', run: () => { switchTab('tab-dashboard'); setTimeout(() => { const el = document.getElementById('waterfallChart'); if (el && el.parentElement) el.parentElement.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100); } },
+        { label: 'Recalculer le waterfall', hint: 'Forcer un recalcul du diagramme de décomposition', icon: 'fa-arrows-rotate', category: 'Action', run: () => { if (typeof renderWaterfallSection === 'function') { renderWaterfallSection(); if (typeof toastInfo === 'function') toastInfo('Waterfall recalculé', 'Les contributions ont été mises à jour.'); } } },
+        { label: (typeof slidePanelMode !== 'undefined' && slidePanelMode === 'slide' ? 'Passer en modal centré' : 'Passer en vue slide-in'), hint: 'Panneau latéral pour le détail d\'actif (← / → pour naviguer)', icon: 'fa-window-restore', category: 'Action', run: () => { if (typeof toggleSlidePanelMode === 'function') toggleSlidePanelMode(); else alert('Module slide-panel non chargé.'); } },
+        { label: 'Actif suivant', hint: 'Naviguer vers l\'actif suivant (flèche →) dans le modal ouvert', icon: 'fa-arrow-right', category: 'Navigation', run: () => { if (typeof navigateAsset === 'function') navigateAsset(+1); else alert('Module slide-panel non chargé.'); } },
+        { label: 'Actif précédent', hint: 'Naviguer vers l\'actif précédent (flèche ←) dans le modal ouvert', icon: 'fa-arrow-left', category: 'Navigation', run: () => { if (typeof navigateAsset === 'function') navigateAsset(-1); else alert('Module slide-panel non chargé.'); } },
+        { label: 'Ouvrir le premier actif', hint: 'Ouvre le détail du 1ᵉʳ actif de l\'inventaire', icon: 'fa-eye', category: 'Actifs', run: () => { if (!assets.length) { alert('Aucun actif dans le portefeuille.'); return; } if (typeof openAssetDetailModal === 'function') openAssetDetailModal(assets[0].id); } },
+        { label: 'Recherche rapide d\'actif', hint: 'Palette dédiée aux actifs (raccourci : Ctrl+P)', icon: 'fa-magnifying-glass', category: 'Navigation', run: () => { if (typeof openQuickSearch === 'function') openQuickSearch(); else alert('Module filtres non chargé.'); } },
+        { label: 'Sauvegarder les filtres actuels', hint: 'Créer un filtre réutilisable depuis l\'état présent', icon: 'fa-floppy-disk', category: 'Action', run: () => { if (typeof promptCreateSavedFilter === 'function') promptCreateSavedFilter(); else alert('Module filtres non chargé.'); } }
     ];
+
+    // ---------------------------------------------------------------------
+    // Sous-commandes dynamiques : un item par filtre sauvegardé (Chantier §9)
+    // ---------------------------------------------------------------------
+    if (typeof loadSavedFilters === 'function') {
+        try {
+            const filters = loadSavedFilters();
+            filters
+                .slice()
+                .sort((a, b) => (b.lastAppliedAt || 0) - (a.lastAppliedAt || 0))
+                .forEach(f => {
+                    const usage = f.applyCount || 0;
+                    const cat = (f.criteria && f.criteria.category && f.criteria.category !== 'ALL')
+                        ? f.criteria.category
+                        : null;
+                    const search = (f.criteria && f.criteria.search) ? f.criteria.search : null;
+                    const details = [];
+                    if (cat) details.push(cat);
+                    if (search) details.push('« ' + search + ' »');
+                    details.push(usage + ' util.');
+
+                    cmds.push({
+                        label: 'Filtre : ' + f.name,
+                        hint: details.join(' · '),
+                        icon: 'fa-filter',
+                        category: 'Filtres sauvegardés',
+                        run: () => {
+                            if (typeof applySavedFilter === 'function') {
+                                applySavedFilter(f.id);
+                                closeSavedFiltersMenu();
+                            } else {
+                                alert('Module filtres non chargé.');
+                            }
+                        }
+                    });
+                });
+
+            if (filters.length > 0) {
+                cmds.push({
+                    label: 'Gérer les filtres sauvegardés',
+                    hint: filters.length + ' filtre(s) mémorisé(s)',
+                    icon: 'fa-list-check',
+                    category: 'Filtres sauvegardés',
+                    run: () => {
+                        switchTab('tab-inventaire');
+                        setTimeout(() => {
+                            if (typeof toggleSavedFiltersMenu === 'function') toggleSavedFiltersMenu();
+                        }, 120);
+                    }
+                });
+            }
+        } catch (err) {
+            console.warn('[CmdPalette] Chargement des filtres sauvegardés échoué :', err);
+        }
+    }
     // Sous-commandes dynamiques : un couple Ouvrir/Modifier pour chaque actif
     assets.forEach(a => {
         cmds.push({

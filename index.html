@@ -34,6 +34,26 @@
                             
         <title>PatriMonial - Gestion & Suivi de Patrimoine</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+
+    <!-- === PWA — Chantier #12 === -->
+    <!-- Manifest : métadonnées d'installation (nom, icônes, raccourcis) -->
+    <link rel="manifest" href="manifest.json">
+
+    <!-- Couleur de la barre système (Android Chrome, Edge, Brave) : accordée au fond sombre de l'app -->
+    <meta name="theme-color" content="#0a0e17">
+
+    <!-- Meta iOS Safari : installation sur l'écran d'accueil -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="PatriMonial">
+    <link rel="apple-touch-icon" href="icon.svg">
+
+    <!-- Meta Android / Chrome : installation via le menu "Ajouter à l'écran d'accueil" -->
+    <meta name="mobile-web-app-capable" content="yes">
+
+    <!-- Fallback universel : titre court utilisé par les launchers d'apps -->
+    <meta name="application-name" content="PatriMonial">
+
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -217,6 +237,31 @@
             </label>
             <button onclick="deleteAllPaperAssets()" class="px-3 py-1.5 rounded-lg bg-rose-950/60 border border-rose-800/50 text-rose-300 hover:bg-rose-900/70 text-[11px] font-medium transition flex items-center gap-1.5" title="Supprimer toutes les positions papier (tous scénarios confondus)">
                 <i class="fa-solid fa-trash-can text-[10px]"></i> Purger tout
+            </button>
+        </div>
+    </div>
+
+    <!-- BANNIÈRE DCA PLANIFIÉ (Chantier §6) — visible uniquement quand un rappel est déclenché -->
+    <div id="dca-banner" class="hidden mb-4 bg-emerald-950/30 border border-emerald-800/50 rounded-xl p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="flex-shrink-0 w-9 h-9 rounded-lg bg-emerald-950 border border-emerald-700/60 flex items-center justify-center text-emerald-300">
+                <i class="fa-solid fa-coins"></i>
+            </div>
+            <div class="min-w-0">
+                <div id="dca-banner-title" class="text-sm font-bold text-emerald-200">
+                    DCA mensuel · à placer
+                </div>
+                <div id="dca-banner-detail" class="text-[11px] text-gray-400">
+                    Suggestion de répartition en cours de calcul…
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
+            <button onclick="openDcaQuickAdd()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium transition flex items-center gap-1.5 shadow-lg shadow-emerald-900/40">
+                <i class="fa-solid fa-plus text-[10px]"></i> Enregistrer l'achat
+            </button>
+            <button onclick="dismissDcaBanner()" class="w-8 h-8 rounded-lg bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 hover:bg-emerald-900/70 transition flex items-center justify-center flex-shrink-0" title="Ignorer pour cette session">
+                <i class="fa-solid fa-xmark text-[11px]"></i>
             </button>
         </div>
     </div>
@@ -430,6 +475,22 @@
                     </div>
                 </div>
             </div>
+
+            <!-- THÈSES À REVOIR (Chantier §10) -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-xl p-4">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-3">
+                    <div>
+                        <h3 class="text-sm font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-scroll text-indigo-400"></i> Thèses d'investissement à revoir
+                        </h3>
+                        <p class="text-[11px] text-gray-400 mt-0.5">
+                            Positions en perte (&lt; -20 %) dont la thèse n'a pas été revue depuis plus d'un an.
+                            Un garde-fou contre les décisions émotionnelles.
+                        </p>
+                    </div>
+                </div>
+                <div id="theses-review-wrap"></div>
+            </div>
         </section>
 
         <!-- TAB 1 : VUE D'ENSEMBLE (graphiques, analyses, scoring) -->
@@ -444,12 +505,17 @@
                             </h3>
                             <p class="text-xs text-gray-400">Aperçu visuel de l'ensemble des actifs</p>
                         </div>
-                        <div class="flex rounded-lg bg-gray-950 border border-gray-800 p-0.5 text-[10px] flex-shrink-0">
-                            <button id="dashboard-alloc-btn-donut" onclick="setDashboardAllocView('donut')" class="px-2 py-1 rounded flex items-center gap-1 transition">
-                                <i class="fa-solid fa-chart-pie"></i> Donut
-                            </button>
-                            <button id="dashboard-alloc-btn-treemap" onclick="setDashboardAllocView('treemap')" class="px-2 py-1 rounded flex items-center gap-1 transition">
-                                <i class="fa-solid fa-table-cells"></i> Treemap
+                        <div class="flex items-center gap-1.5 flex-shrink-0">
+                            <div class="flex rounded-lg bg-gray-950 border border-gray-800 p-0.5 text-[10px]">
+                                <button id="dashboard-alloc-btn-donut" onclick="setDashboardAllocView('donut')" class="px-2 py-1 rounded flex items-center gap-1 transition">
+                                    <i class="fa-solid fa-chart-pie"></i> Donut
+                                </button>
+                                <button id="dashboard-alloc-btn-treemap" onclick="setDashboardAllocView('treemap')" class="px-2 py-1 rounded flex items-center gap-1 transition">
+                                    <i class="fa-solid fa-table-cells"></i> Treemap
+                                </button>
+                            </div>
+                            <button onclick="document.getElementById('waterfallChart')?.parentElement?.scrollIntoView({ behavior: 'smooth', block: 'center' })" class="px-2 py-1 rounded-lg bg-gray-950 border border-gray-800 text-gray-400 hover:text-cyan-300 hover:border-cyan-700/60 text-[10px] flex items-center gap-1 transition" title="Voir la décomposition du P&L par actif">
+                                <i class="fa-solid fa-chart-column"></i> P&amp;L
                             </button>
                         </div>
                     </div>
@@ -533,6 +599,170 @@
 
                 <div class="overflow-x-auto pb-1">
                     <svg id="calendarHeatmapSvg" class="block" style="min-width:820px;"></svg>
+                </div>
+            </div>
+
+            <!-- RAPPORT DE PERFORMANCE MENSUEL (Chantier §4) -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-xl p-5">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                    <div>
+                        <h3 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-calendar-check text-emerald-400"></i> Rapport de performance mensuel
+                        </h3>
+                        <p class="text-xs text-gray-400">
+                            Historique automatique des performances mensuelles (MoM / YoY).
+                            Un snapshot est créé au début de chaque mois et mis à jour en continu.
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <button onclick="renderMonthlySnapshotsSection()" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-medium border border-gray-700 flex items-center gap-1.5 whitespace-nowrap" title="Rafraîchir le tableau et le graphique">
+                            <i class="fa-solid fa-arrows-rotate text-[10px]"></i> Rafraîchir
+                        </button>
+                        <button onclick="document.getElementById('modal-monthly-help').classList.remove('hidden')" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-medium border border-gray-700 flex items-center gap-1.5 whitespace-nowrap transition" title="Comment fonctionne le rapport mensuel ?">
+                            <i class="fa-solid fa-circle-question text-[10px]"></i> Aide
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tableau historique -->
+                <div id="monthly-history-table-wrap" class="mb-4">
+                    <div class="text-center text-gray-500 italic text-xs py-4">Chargement…</div>
+                </div>
+
+                <!-- Bar chart "Performance mensuelle" -->
+                <div>
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+                        Variations mensuelles (MoM, en €)
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded-xl p-3 h-64">
+                        <canvas id="monthlyPerformanceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MATRICE DE CORRÉLATION DES ACTIFS (Chantier §5) -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-xl p-5">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                    <div>
+                        <h3 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-diagram-project text-purple-400"></i> Matrice de corrélation des actifs
+                        </h3>
+                        <p class="text-xs text-gray-400">
+                            Corrélation de Pearson calculée sur les rendements journaliers réels (30 jours communs minimum).
+                            Détecte les <b>concentrations cachées</b> — plusieurs actifs qui évoluent en réalité comme un seul.
+                        </p>
+                    </div>
+                    <button onclick="if (typeof invalidateCorrelationCache === 'function') invalidateCorrelationCache(); renderCorrelationSection();" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-medium border border-gray-700 flex items-center gap-1.5 whitespace-nowrap" title="Recalculer la matrice">
+                        <i class="fa-solid fa-arrows-rotate text-[10px]"></i> Recalculer
+                    </button>
+                </div>
+
+                <!-- KPIs de couverture -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <div class="bg-gray-950 border border-gray-800 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Actifs corrélables</div>
+                        <div class="font-mono font-bold text-white">
+                            <span id="correlation-stat-count">0</span> / <span id="correlation-stat-total" class="text-gray-500">0</span>
+                        </div>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Corrélation moyenne</div>
+                        <div class="text-lg font-bold font-mono text-gray-400" id="correlation-stat-avg">—</div>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Clusters détectés</div>
+                        <div class="text-lg font-bold font-mono text-white" id="correlation-stat-clusters">0</div>
+                        <div class="text-[9px] text-gray-500">≥ 3 actifs corrélés &gt; 0.85</div>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Seuils</div>
+                        <div class="text-[10px] font-mono text-gray-400 leading-tight mt-1">
+                            <span class="text-rose-400">■</span> Fort (&gt; 0.85)<br>
+                            <span class="text-blue-400">■</span> Négatif (&lt; 0)
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alerte "concentration cachée" -->
+                <div id="correlation-clusters-alert" class="mb-4"></div>
+
+                <!-- Heatmap SVG -->
+                <div class="bg-gray-950 border border-gray-800 rounded-xl p-4 overflow-auto">
+                    <div class="flex items-center justify-center min-h-[200px]">
+                        <svg id="correlationHeatmapSvg" class="block"></svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- WATERFALL DU P&L (Chantier §7) -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-xl p-5">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                    <div>
+                        <h3 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-chart-column text-cyan-400"></i> Décomposition du P&amp;L
+                        </h3>
+                        <p class="text-xs text-gray-400">
+                            Comment chaque actif contribue-t-il à votre plus-value latente totale ?
+                            Les <b>6 plus gros contributeurs</b> sont affichés individuellement,
+                            le reste est regroupé sous « Autres ».
+                        </p>
+                    </div>
+                    <button onclick="renderWaterfallSection()" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-medium border border-gray-700 flex items-center gap-1.5 whitespace-nowrap" title="Recalculer le waterfall">
+                        <i class="fa-solid fa-arrows-rotate text-[10px]"></i> Recalculer
+                    </button>
+                </div>
+
+                <!-- KPIs récapitulatifs -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <div class="bg-gray-950 border border-cyan-900/40 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">P&amp;L Total</div>
+                        <div class="text-lg font-bold font-mono text-white" id="waterfall-stat-total">0,00 €</div>
+                        <div class="text-[9px] text-gray-500" id="waterfall-stat-count">0 actif(s)</div>
+                    </div>
+                    <div class="bg-gray-950 border border-emerald-900/40 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Meilleur contributeur</div>
+                        <div class="font-mono font-bold text-emerald-400" id="waterfall-stat-best">—</div>
+                        <div class="text-[9px] text-gray-500 font-mono" id="waterfall-stat-best-label">—</div>
+                    </div>
+                    <div class="bg-gray-950 border border-rose-900/40 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Pire contributeur</div>
+                        <div class="font-mono font-bold text-rose-400" id="waterfall-stat-worst">—</div>
+                        <div class="text-[9px] text-gray-500 font-mono" id="waterfall-stat-worst-label">—</div>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Répartition</div>
+                        <div class="text-[11px] font-mono leading-tight mt-0.5">
+                            <span class="text-emerald-400">▲</span> <span id="waterfall-stat-positive">0</span> en gain<br>
+                            <span class="text-rose-400">▼</span> <span id="waterfall-stat-negative">0</span> en perte
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Graphique waterfall -->
+                <div class="bg-gray-950 border border-gray-800 rounded-xl p-3 h-80 relative">
+                    <canvas id="waterfallChart"></canvas>
+                    <!-- État vide -->
+                    <div id="waterfall-empty" class="hidden absolute inset-0 flex flex-col items-center justify-center text-gray-500 text-xs gap-2">
+                        <i class="fa-solid fa-chart-column text-3xl text-gray-700"></i>
+                        <div>Aucun actif à décomposer.</div>
+                        <div class="text-[10px] italic">Ajoutez des actifs pour voir leur contribution au P&amp;L.</div>
+                    </div>
+                </div>
+
+                <!-- Légende interprétative -->
+                <div class="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-gray-500">
+                    <span class="flex items-center gap-1">
+                        <span class="inline-block w-3 h-3 rounded" style="background:rgba(16,185,129,0.80);"></span> Gain
+                    </span>
+                    <span class="flex items-center gap-1">
+                        <span class="inline-block w-3 h-3 rounded" style="background:rgba(244,63,94,0.80);"></span> Perte
+                    </span>
+                    <span class="flex items-center gap-1">
+                        <span class="inline-block w-3 h-3 rounded" style="background:rgba(59,130,246,0.75);"></span> Total
+                    </span>
+                    <span class="italic ml-auto">
+                        <i class="fa-solid fa-mouse-pointer text-[9px] mr-1"></i>Cliquez sur une barre pour ouvrir le détail de l'actif
+                    </span>
                 </div>
             </div>
 
@@ -807,6 +1037,52 @@
                 <div id="suggestions-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3"></div>
             </div>
 
+            <!-- DÉTECTION DES LIGNES MORTES (Chantier #10) -->
+            <div class="bg-gray-900/60 border border-amber-900/40 rounded-xl p-5">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                    <div>
+                        <h3 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-triangle-exclamation text-amber-400"></i> Lignes mortes
+                        </h3>
+                        <p class="text-xs text-gray-400">
+                            Positions qui cumulent plusieurs signaux faibles (poids &lt; 0,5 %, performance plate,
+                            ancienneté inactive, frais élevés…) sans rôle justifié. Un garde-fou contre le
+                            « musée du portefeuille ».
+                        </p>
+                    </div>
+                    <button onclick="openDeadLinesMethodModal()" class="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-medium border border-gray-700 flex items-center gap-1.5 whitespace-nowrap transition">
+                        <i class="fa-solid fa-circle-question text-[10px]"></i> Méthode
+                    </button>
+                </div>
+
+                <!-- KPIs -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <div class="bg-gray-950 border border-amber-900/40 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Lignes détectées</div>
+                        <div class="text-lg font-bold font-mono text-white" id="deadlines-stat-total">0</div>
+                        <div class="text-[9px] text-gray-500">au score ≥ 40</div>
+                    </div>
+                    <div class="bg-gray-950 border border-rose-900/40 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Critiques</div>
+                        <div class="text-lg font-bold font-mono text-rose-400" id="deadlines-stat-critical">0</div>
+                        <div class="text-[9px] text-gray-500">score ≥ 70</div>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Capital concerné</div>
+                        <div class="text-lg font-bold font-mono text-white" id="deadlines-stat-capital">0,00 €</div>
+                        <div class="text-[9px] text-gray-500">valeur cumulée</div>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Seuil actif</div>
+                        <div class="text-lg font-bold font-mono text-gray-400" id="deadlines-stat-threshold">40 / 100</div>
+                        <div class="text-[9px] text-gray-500">paramétrable</div>
+                    </div>
+                </div>
+
+                <!-- Liste -->
+                <div id="dead-lines-wrap"></div>
+            </div>
+
             <!-- LEADERBOARD — SCORING DES ACTIFS (Chantier H) -->
             <div class="bg-gray-900/60 border border-gray-800 rounded-xl p-5">
                 <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
@@ -943,8 +1219,36 @@
                     <button data-cat="CADRAN_PETROLE" onclick="filterCategory('CADRAN_PETROLE')" class="filter-btn filter-btn-cadran px-3 py-1.5 rounded-lg bg-gray-900 text-gray-400 hover:text-white text-xs border border-gray-800" id="inv-filter-CADRAN_PETROLE">Cadran Pétrole</button>
                     <button data-cat="CADRAN_ALL4" onclick="filterCategory('CADRAN_ALL4')" class="filter-btn px-3 py-1.5 rounded-lg bg-gray-900 text-gray-400 hover:text-white text-xs border border-gray-800">4 Cadrans de Gave</button>
                 </div>
-                <div class="flex items-center gap-2 w-full md:w-auto">
-                    <input type="text" id="inventory-search" oninput="searchInventory()" placeholder="Rechercher un actif..." class="bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-emerald-500 flex-1 md:w-64">
+                <div class="flex items-center gap-2 w-full md:w-auto flex-wrap">
+                    <input type="text" id="inventory-search" oninput="searchInventory()" placeholder="Rechercher un actif... (Ctrl+P pour global)" class="bg-gray-900 border border-gray-800 rounded-lg px-3 py-1.5 text-xs text-gray-200 focus:outline-none focus:border-emerald-500 flex-1 md:w-64">
+
+                    <!-- FILTRES SAUVEGARDÉS (Chantier §9) -->
+                    <div class="relative">
+                        <button type="button" onclick="toggleSavedFiltersMenu(event)" class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-800 text-xs text-gray-400 hover:text-teal-300 hover:border-teal-800/60 transition flex items-center gap-1.5" title="Filtres sauvegardés (jeux de critères réutilisables)">
+                            <i class="fa-solid fa-filter text-[11px]"></i>
+                            <span class="hidden sm:inline">Filtres</span>
+                        </button>
+                        <div id="saved-filters-menu" class="hidden absolute right-0 top-full mt-2 w-80 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl overflow-hidden z-[60]">
+                            <div class="p-2.5 border-b border-gray-800 bg-gray-950 flex items-center justify-between">
+                                <div>
+                                    <div class="text-[10px] text-gray-500 uppercase tracking-wider font-bold">Filtres sauvegardés</div>
+                                    <div class="text-[10px] text-gray-600 mt-0.5">Jeux de critères réutilisables en 1 clic</div>
+                                </div>
+                                <button type="button" onclick="event.stopPropagation(); promptCreateSavedFilter();" class="px-2 py-1 rounded bg-teal-950/60 text-teal-300 border border-teal-800/50 hover:bg-teal-900/70 text-[10px] font-medium flex items-center gap-1 transition" title="Sauvegarder les filtres actuels">
+                                    <i class="fa-solid fa-plus text-[9px]"></i> Nouveau
+                                </button>
+                            </div>
+                            <div id="saved-filters-menu-list" class="max-h-72 overflow-y-auto">
+                                <div class="p-3 text-[11px] text-gray-500 italic text-center">Aucun filtre sauvegardé.</div>
+                            </div>
+                            <div class="p-2 border-t border-gray-800 bg-gray-950">
+                                <button type="button" onclick="event.stopPropagation(); promptCreateSavedFilter(); closeSavedFiltersMenu();" class="w-full px-3 py-2 rounded-lg bg-teal-600 hover:bg-teal-500 text-white text-[11px] font-medium transition flex items-center justify-center gap-1.5">
+                                    <i class="fa-solid fa-floppy-disk"></i> Sauvegarder les filtres actuels
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                     <label class="flex items-center gap-1.5 text-[11px] text-gray-500 whitespace-nowrap" title="Badge ⚠ sur tout actif dépassant ce poids dans le portefeuille">
                         <i class="fa-solid fa-triangle-exclamation text-amber-400"></i>
                         Seuil&nbsp;:
@@ -2191,6 +2495,67 @@
             </button>
         </div>
 
+        <!-- PANNEAU DCA PLANIFIÉ (Chantier §6) -->
+        <div id="dca-panel" class="bg-gradient-to-br from-emerald-950/40 to-teal-950/30 border border-emerald-800/50 rounded-xl p-5">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4">
+                <div>
+                    <div class="flex items-center gap-2 text-emerald-300 text-base font-bold">
+                        <i class="fa-solid fa-coins"></i> DCA planifié
+                    </div>
+                    <p class="text-xs text-gray-300 mt-0.5">
+                        Rappel mensuel automatique du montant à investir + suggestion du cadran
+                        le plus sous-pondéré (cible 25 %).
+                    </p>
+                </div>
+                <div class="flex items-center gap-2 flex-shrink-0">
+                    <button id="dca-toggle-btn" onclick="toggleDcaEnabled()" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-300 border border-emerald-800/50 hover:bg-emerald-900/70 text-xs font-medium transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-play text-[10px]"></i> Activer
+                    </button>
+                    <button onclick="openDcaConfigModal()" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-300 border border-emerald-700/50 hover:bg-emerald-900/80 text-xs font-medium transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-sliders text-[10px]"></i> Configurer
+                    </button>
+                </div>
+            </div>
+
+            <!-- KPIs DCA -->
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                <div class="bg-gray-950/60 border border-emerald-900/40 rounded-xl p-3">
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Montant mensuel</div>
+                    <div class="text-lg font-bold font-mono text-white" id="dca-stat-amount">500,00 €</div>
+                    <div class="text-[10px] text-gray-500" id="dca-stat-label">—</div>
+                </div>
+                <div class="bg-gray-950/60 border border-emerald-900/40 rounded-xl p-3">
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Jour du mois</div>
+                    <div class="text-lg font-bold font-mono text-white" id="dca-stat-day">5 du mois</div>
+                    <div class="text-[10px] text-gray-500">tolérance : jours suivants</div>
+                </div>
+                <div class="bg-gray-950/60 border border-emerald-900/40 rounded-xl p-3">
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Dernier rappel</div>
+                    <div class="text-lg font-bold font-mono text-white" id="dca-stat-last">—</div>
+                    <div class="text-[10px] text-gray-500">cooldown 1 mois</div>
+                </div>
+                <div class="bg-gray-950/60 border border-emerald-900/40 rounded-xl p-3">
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Statut</div>
+                    <div class="text-lg font-bold font-mono text-white" id="dca-stat-status">Désactivé</div>
+                    <div class="text-[10px] text-gray-500">rappels automatiques</div>
+                </div>
+            </div>
+
+            <!-- Suggestion de cadran -->
+            <div class="bg-gray-950/60 border border-emerald-900/40 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div class="flex items-start gap-3 min-w-0">
+                    <i class="fa-solid fa-lightbulb text-emerald-400 mt-0.5 flex-shrink-0"></i>
+                    <div class="min-w-0">
+                        <div class="text-[10px] text-emerald-300 uppercase tracking-wider font-bold mb-1">Suggestion de placement</div>
+                        <div id="dca-suggestion-text" class="text-[11px] text-gray-300 leading-relaxed">
+                            Ajoutez des actifs pour activer la suggestion.
+                        </div>
+                    </div>
+                </div>
+                <div id="dca-suggestion-badge" class="hidden px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700/50 text-[9px] font-bold flex-shrink-0"></div>
+            </div>
+        </div>
+
         <!-- PANNEAU FIRE / INDÉPENDANCE FINANCIÈRE (Chantier 1.9) -->
         <div id="fire-panel" class="bg-gradient-to-br from-orange-950/40 to-amber-950/30 border border-orange-800/50 rounded-xl p-5">
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4">
@@ -2290,6 +2655,92 @@
                         <i class="fa-solid fa-circle-info mr-1"></i>
                         Simulation de <b>5 000 trajectoires</b> sur 50 ans max, avec la <b>volatilité réelle</b> de votre portefeuille
                         (<span id="fire-mc-vol">—</span>). Rendement réel attendu : <span id="fire-mc-return">—</span>.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SIMULATEUR DE SORTIE PROGRESSIVE (Chantier §9) -->
+        <div id="withdrawal-panel" class="bg-gradient-to-br from-violet-950/40 to-indigo-950/30 border border-violet-800/50 rounded-xl p-5">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4">
+                <div>
+                    <div class="flex items-center gap-2 text-violet-300 text-base font-bold">
+                        <i class="fa-solid fa-wallet"></i> Simulateur de sortie progressive
+                    </div>
+                    <p class="text-xs text-gray-300 mt-0.5">
+                        « Puis-je retirer X €/mois à la retraite et tenir sur N années ? »
+                        Monte-Carlo sur 5 000 trajectoires avec la volatilité réelle de votre portefeuille.
+                    </p>
+                </div>
+                <button onclick="openWithdrawalConfigModal()" class="px-3 py-1.5 rounded-lg bg-violet-950/60 text-violet-300 border border-violet-700/50 hover:bg-violet-900/80 text-xs font-medium transition flex items-center gap-1.5 flex-shrink-0">
+                    <i class="fa-solid fa-sliders text-[10px]"></i> Configurer
+                </button>
+            </div>
+
+            <!-- KPIs -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+                <div class="bg-gray-950/60 border border-violet-900/40 rounded-xl p-3">
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Probabilité de survie</div>
+                    <div id="withdrawal-stat-success" class="text-2xl font-bold font-mono text-white">— %</div>
+                    <div class="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden mt-2">
+                        <div id="withdrawal-stat-success-bar" class="h-full transition-all" style="width:0%;background:#8b5cf6;"></div>
+                    </div>
+                    <div class="text-[10px] text-gray-500 mt-1">sur la durée configurée</div>
+                </div>
+                <div class="bg-gray-950/60 border border-violet-900/40 rounded-xl p-3">
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Capital de départ</div>
+                    <div class="text-lg font-bold font-mono text-white" id="withdrawal-stat-capital">0,00 €</div>
+                    <div class="text-[10px] text-gray-500 mt-1">patrimoine réel actuel</div>
+                </div>
+                <div class="bg-gray-950/60 border border-violet-900/40 rounded-xl p-3">
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Retrait mensuel</div>
+                    <div class="text-lg font-bold font-mono text-white" id="withdrawal-stat-monthly">0,00 € / mois</div>
+                    <div class="text-[10px] text-gray-500 mt-1">en euros constants (inflation ajustée)</div>
+                </div>
+                <div class="bg-gray-950/60 border border-violet-900/40 rounded-xl p-3">
+                    <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Taux de retrait implicite</div>
+                    <div class="text-lg font-bold font-mono text-white" id="withdrawal-stat-rate">— % / an</div>
+                    <div class="text-[10px] text-gray-500 mt-1">sanity check vs règle des 4 %</div>
+                </div>
+            </div>
+
+            <!-- Diagnostic + percentiles -->
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
+                <div class="lg:col-span-2 bg-gray-950/60 border border-violet-900/40 rounded-xl p-4 space-y-3">
+                    <div class="text-[11px] font-bold text-violet-300 uppercase tracking-wider">Distribution du capital à échéance</div>
+                    <div class="grid grid-cols-3 gap-2 text-[11px] font-mono">
+                        <div class="bg-gray-900/60 border border-rose-900/40 rounded-lg p-2">
+                            <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">P10 (pessimiste)</div>
+                            <div class="font-bold text-gray-300" id="withdrawal-stat-p10">—</div>
+                        </div>
+                        <div class="bg-gray-900/60 border border-violet-900/40 rounded-lg p-2">
+                            <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Médiane (P50)</div>
+                            <div class="font-bold text-white" id="withdrawal-stat-median">—</div>
+                        </div>
+                        <div class="bg-gray-900/60 border border-emerald-900/40 rounded-lg p-2">
+                            <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">P90 (optimiste)</div>
+                            <div class="font-bold text-gray-300" id="withdrawal-stat-p90">—</div>
+                        </div>
+                    </div>
+                    <div id="withdrawal-diagnostic" class="text-[11px] leading-relaxed text-gray-500 italic">Ajoutez des actifs pour lancer la simulation.</div>
+                    <div id="withdrawal-depletion-alert" class="hidden bg-rose-950/40 border border-rose-800/50 rounded-lg p-2.5 text-[11px] text-rose-200"></div>
+                </div>
+
+                <!-- Méthodologie -->
+                <div class="bg-gray-950/60 border border-violet-900/40 rounded-xl p-4 space-y-2.5">
+                    <div class="text-[11px] font-bold text-violet-300 uppercase tracking-wider">Hypothèses</div>
+                    <div class="flex justify-between text-[11px]">
+                        <span class="text-gray-500">Volatilité retenue</span>
+                        <span class="font-mono text-gray-300" id="withdrawal-stat-vol">—</span>
+                    </div>
+                    <div class="flex justify-between text-[11px]">
+                        <span class="text-gray-500">Rendement réel</span>
+                        <span class="font-mono text-gray-300" id="withdrawal-stat-real">—</span>
+                    </div>
+                    <div class="text-[10px] text-gray-500 leading-relaxed pt-2 border-t border-gray-800">
+                        <i class="fa-solid fa-circle-info mr-1"></i>
+                        Simulation Monte-Carlo · 5 000 trajectoires · méthode Fisher exacte pour le rendement réel
+                        (retraits en euros constants).
                     </div>
                 </div>
             </div>
@@ -2470,6 +2921,79 @@
         </div>
     </div>
 
+    <!-- MODAL : CONFIGURATION DCA PLANIFIÉ (Chantier §6) -->
+    <div id="modal-dca-config" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60] hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
+                <h3 class="font-bold text-white text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-coins text-emerald-400"></i> Configuration DCA planifié
+                </h3>
+                <button onclick="closeModal('modal-dca-config')" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="handleSaveDcaConfig(event)" class="p-4 space-y-3 text-xs overflow-y-auto">
+                <div>
+                    <label class="block text-gray-400 mb-1">Nom du plan *</label>
+                    <input type="text" id="dca-input-label" required placeholder="ex: DCA mensuel, Épargne retraite…" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-gray-400 mb-1">Montant mensuel (€) *</label>
+                        <input type="number" step="any" id="dca-input-amount" required value="500" oninput="updateDcaPreview()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 mb-1">Jour du mois * <span class="text-gray-600 text-[10px]">(1-28)</span></label>
+                        <input type="number" min="1" max="28" id="dca-input-day" required value="5" oninput="updateDcaPreview()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-gray-400 mb-1">
+                        Cadran cible
+                        <span class="text-gray-600 text-[10px] ml-1">— laissez sur « Auto » pour une suggestion dynamique</span>
+                    </label>
+                    <select id="dca-input-cadran" onchange="updateDcaPreview()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500">
+                        <option value="">Auto — Suggestion dynamique (cadran le plus sous-pondéré)</option>
+                        <option value="OR">Cadran 1 : OR</option>
+                        <option value="MONNAIES">Cadran 2 : MONNAIES / DEVISES</option>
+                        <option value="ASIE">Cadran 3 : ACTIONS / ASIE</option>
+                        <option value="PETROLE">Cadran 4 : PÉTROLE / COMMODITIES</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-gray-400 mb-1">Notes (optionnel)</label>
+                    <textarea id="dca-input-notes" rows="2" placeholder="ex: à ajuster selon les revenus du mois…" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500"></textarea>
+                </div>
+
+                <!-- Aperçu -->
+                <div class="bg-emerald-950/30 border border-emerald-800/50 rounded-lg p-3 space-y-2">
+                    <div class="text-[10px] text-emerald-300 uppercase tracking-wider font-bold">Aperçu</div>
+                    <div class="flex justify-between items-baseline">
+                        <span class="text-[11px] text-gray-300">Effort annuel :</span>
+                        <span class="text-lg font-mono font-bold text-white" id="dca-preview-annual">—</span>
+                    </div>
+                    <div class="text-[10px] text-gray-400 leading-relaxed" id="dca-preview-suggestion">
+                        Suggestion de répartition en cours de calcul…
+                    </div>
+                </div>
+
+                <div class="bg-blue-950/20 border border-blue-800/40 rounded-lg p-2.5 text-[10px] text-blue-200 leading-relaxed">
+                    <i class="fa-solid fa-circle-info text-blue-400 mr-1"></i>
+                    <b>Fonctionnement :</b> à partir du jour configuré, un rappel est envoyé (toast + notification système) une fois par mois.
+                    Le bouton « Enregistrer l'achat » ouvre le formulaire d'ajout pré-rempli avec le montant, le cadran suggéré et un bandeau contextuel.
+                </div>
+
+                <div class="pt-2 flex justify-end gap-2 border-t border-gray-800">
+                    <button type="button" onclick="closeModal('modal-dca-config')" class="px-4 py-2 rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700">Annuler</button>
+                    <button type="submit" class="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium">
+                        <i class="fa-solid fa-check text-[10px] mr-1"></i> Enregistrer
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- MODAL : CONFIGURATION FIRE (Chantier 1.9) -->
     <div id="modal-fire-config" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60] hidden">
         <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
@@ -2613,6 +3137,75 @@
                     </button>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- MODAL : CONFIGURATION DU SIMULATEUR DE SORTIE PROGRESSIVE (Chantier §9) -->
+    <div id="modal-withdrawal-config" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60] hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
+                <h3 class="font-bold text-white text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-wallet text-violet-400"></i> Configuration — Sortie progressive
+                </h3>
+                <button onclick="closeModal('modal-withdrawal-config')" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="handleSaveWithdrawalConfig(event)" class="p-4 space-y-3 text-xs overflow-y-auto">
+
+                <div>
+                    <label class="block text-gray-400 mb-1">Retrait mensuel souhaité (€ constants) *</label>
+                    <input type="number" step="any" id="wd-input-monthly" required value="2500" oninput="updateWithdrawalPreview()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-violet-500">
+                    <p class="text-[10px] text-gray-500 mt-1">Ce que vous voulez retirer chaque mois, exprimé en euros d'aujourd'hui (ajusté à l'inflation chaque année).</p>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-gray-400 mb-1">Horizon (années) *</label>
+                        <input type="number" min="1" max="60" id="wd-input-years" required value="30" oninput="updateWithdrawalPreview()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-violet-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 mb-1">Rendement nominal (%/an)</label>
+                        <input type="number" step="any" id="wd-input-return" value="5.00" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-violet-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-gray-400 mb-1">Inflation (%/an)</label>
+                        <input type="number" step="any" id="wd-input-inflation" value="2.00" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-violet-500">
+                    </div>
+                    <div>
+                        <label class="block text-gray-400 mb-1">Volatilité (%/an)</label>
+                        <input type="number" step="any" id="wd-input-vol" placeholder="vide = vol. réelle" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-violet-500">
+                        <p class="text-[10px] text-gray-500 mt-1">Vide = utilise la volatilité réelle calculée depuis votre portefeuille.</p>
+                    </div>
+                </div>
+
+                <!-- Aperçu -->
+                <div class="bg-violet-950/30 border border-violet-800/50 rounded-lg p-3 space-y-2">
+                    <div class="text-[10px] text-violet-300 uppercase tracking-wider font-bold">Aperçu naïf (sans rendement)</div>
+                    <div class="flex justify-between items-baseline">
+                        <span class="text-[11px] text-gray-300">Retraits nominaux bruts :</span>
+                        <span class="text-lg font-mono font-bold text-white" id="wd-preview-total">—</span>
+                    </div>
+                    <div class="text-[10px] text-gray-500 leading-relaxed" id="wd-preview-detail">
+                        Retraits nominaux bruts sur la durée configurée (sans prise en compte du rendement ni de l'inflation)
+                    </div>
+                </div>
+
+                <div class="bg-blue-950/20 border border-blue-800/40 rounded-lg p-2.5 text-[10px] text-blue-200 leading-relaxed">
+                    <i class="fa-solid fa-circle-info text-blue-400 mr-1"></i>
+                    <b>Méthode :</b> Monte-Carlo sur 5 000 trajectoires mensuelles. Le rendement réel (Fisher exact)
+                    est appliqué mois par mois avec un tirage gaussien calé sur la volatilité réelle. Les retraits
+                    sont constants en euros d'aujourd'hui — ils ne sont donc jamais « mangés » par l'inflation.
+                </div>
+
+                <div class="pt-2 flex justify-end gap-2 border-t border-gray-800">
+                    <button type="button" onclick="closeModal('modal-withdrawal-config')" class="px-4 py-2 rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700">Annuler</button>
+                    <button type="submit" class="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-medium">
+                        <i class="fa-solid fa-check text-[10px] mr-1"></i> Enregistrer & simuler
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 
@@ -4081,6 +4674,139 @@
         </div>
     </div>
 
+    <!-- MODAL : DÉTAIL D'UNE PAIRE DE CORRÉLATION (Chantier §5) -->
+    <div id="modal-correlation-pair" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60] hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
+                <h3 id="correlation-modal-title" class="font-bold text-white text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-code-compare text-purple-400"></i> Corrélation
+                </h3>
+                <button onclick="closeModal('modal-correlation-pair')" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="correlation-modal-body" class="p-5 space-y-4 overflow-y-auto text-xs text-gray-300"></div>
+        </div>
+    </div>
+
+    <!-- MODAL : AIDE SUR LE RAPPORT MENSUEL (Chantier §4) -->
+    <div id="modal-monthly-help" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60] hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
+                <h3 class="font-bold text-white text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-calendar-check text-emerald-400"></i> Rapport de performance mensuel
+                </h3>
+                <button onclick="closeModal('modal-monthly-help')" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-5 space-y-4 overflow-y-auto text-xs text-gray-300 leading-relaxed">
+
+                <div>
+                    <div class="text-[11px] font-bold text-emerald-300 uppercase tracking-wider mb-1">À quoi ça sert ?</div>
+                    <p>
+                        Suivre l'évolution de votre portefeuille <b>mois par mois</b> sur le long terme.
+                        Répond à des questions simples : « Combien j'ai gagné en octobre ? », « Suis-je en progression sur 12 mois ? », « Quel mois a été le pire ? »
+                    </p>
+                </div>
+
+                <div>
+                    <div class="text-[11px] font-bold text-emerald-300 uppercase tracking-wider mb-1">Comment ça marche ?</div>
+                    <ul class="list-disc list-inside space-y-1">
+                        <li>Le <b>snapshot du mois en cours</b> est créé automatiquement au premier démarrage du mois.</li>
+                        <li>Il est ensuite <b>mis à jour en continu</b> (throttlé à 1× / 30 min pour ne pas saturer localStorage).</li>
+                        <li>Au début du mois suivant, le snapshot précédent est <b>automatiquement figé</b> : il garde la valeur du dernier refresh du mois.</li>
+                        <li>Les <b>60 derniers mois</b> (5 ans) sont conservés.</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <div class="text-[11px] font-bold text-emerald-300 uppercase tracking-wider mb-1">MoM et YoY</div>
+                    <ul class="list-disc list-inside space-y-1">
+                        <li><b>MoM</b> (Month-over-Month) : variation vs le mois précédent.</li>
+                        <li><b>YoY</b> (Year-over-Year) : variation vs le même mois l'an dernier.</li>
+                        <li>Le <b>premier mois</b> n'a pas de MoM, et les <b>12 premiers mois</b> n'ont pas de YoY — ce sont des références.</li>
+                    </ul>
+                </div>
+
+                <div>
+                    <div class="text-[11px] font-bold text-emerald-300 uppercase tracking-wider mb-1">Limites</div>
+                    <ul class="list-disc list-inside space-y-1">
+                        <li>Les <b>snapshots sont liés au portefeuille courant</b>. Changer de portefeuille affiche un historique différent.</li>
+                        <li>Les positions <b>papier (paper trading)</b> sont exclues des snapshots (seul le portefeuille réel est archivé).</li>
+                        <li>Un snapshot est un <b>instantané de la valeur</b>, pas du contenu. Si vous vendez tout puis rachetez autre chose, l'historique n'est pas affecté (seule la valeur totale compte).</li>
+                    </ul>
+                </div>
+
+                <div class="bg-blue-950/20 border border-blue-800/40 rounded-lg p-3 text-[11px] text-blue-200">
+                    <i class="fa-solid fa-lightbulb text-blue-400 mr-1"></i>
+                    <b>Astuce :</b> vous pouvez créer un snapshot manuellement via <kbd class="bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 text-[10px] font-mono">Ctrl+K</kbd> → « Créer un snapshot manuellement ».
+                    Utile juste avant de faire une grosse vente ou d'importer des données.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL : ÉDITION DE THÈSE D'INVESTISSEMENT (Chantier §10) -->
+    <div id="modal-thesis-edit" class="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60] hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
+                <h3 id="thesis-modal-title" class="font-bold text-white text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-scroll text-indigo-400"></i> Thèse d'investissement
+                </h3>
+                <button onclick="closeModal('modal-thesis-edit')" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="handleThesisSubmit(event)" class="p-4 space-y-3 text-xs overflow-y-auto">
+                <input type="hidden" id="thesis-asset-id">
+                <div id="thesis-modal-info" class="bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-[10px] text-gray-400 leading-relaxed">
+                    <i class="fa-solid fa-lightbulb text-amber-400 mr-1"></i> Décrivez en quelques phrases pourquoi vous détenez cette position.
+                </div>
+                <div>
+                    <div class="flex justify-between items-baseline mb-1">
+                        <label class="block text-gray-400">Votre thèse</label>
+                        <span id="thesis-char-count" class="text-[10px] font-mono text-gray-500">0 / 500</span>
+                    </div>
+                    <textarea id="thesis-text-input" rows="8"
+                              oninput="updateThesisCharCount()"
+                              placeholder="Ex : Je détiens NVDA car je crois à la domination durable de son écosystème CUDA dans l'IA entraînement. Je vendrais si (1) la marge brute passe sous 60 % deux trimestres de suite, (2) un concurrent crédible émerge sur les GPU IA, (3) la valorisation dépasse 50x le chiffre d'affaires."
+                              class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2.5 text-white font-sans leading-relaxed focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+                </div>
+                <div class="bg-blue-950/20 border border-blue-800/40 rounded-lg p-2.5 text-[10px] text-blue-100 leading-relaxed">
+                    <i class="fa-solid fa-circle-info text-blue-400 mr-1"></i>
+                    <b>Rappel automatique :</b> si la position perd plus de 20 % et que la thèse n'a pas été revue depuis plus d'un an, un bandeau d'alerte s'affiche dans le détail de l'actif.
+                </div>
+                <div class="pt-2 flex justify-between gap-2 border-t border-gray-800">
+                    <button type="button" id="thesis-delete-btn" onclick="deleteThesisConfirm()" class="px-3 py-2 rounded-lg bg-rose-950/60 text-rose-300 border border-rose-800/50 hover:bg-rose-900/70 text-[11px] font-medium transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-trash text-[10px]"></i> Supprimer
+                    </button>
+                    <div class="flex gap-2">
+                        <button type="button" onclick="closeModal('modal-thesis-edit')" class="px-4 py-2 rounded-lg bg-gray-800 text-gray-300 hover:bg-gray-700">Annuler</button>
+                        <button type="submit" class="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium">
+                            <i class="fa-solid fa-check text-[10px] mr-1"></i> Enregistrer
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL : RECHERCHE RAPIDE Ctrl+P (Chantier §9) -->
+    <div id="modal-quick-search" class="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-start justify-center p-4 pt-[10vh] z-[70] hidden">
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl flex flex-col">
+            <div class="flex items-center gap-3 p-3 border-b border-gray-800 bg-gray-950">
+                <i class="fa-solid fa-magnifying-glass text-teal-400"></i>
+                <input type="text" id="quick-search-input"
+                       oninput="renderQuickSearchResults(this.value)"
+                       onkeydown="handleQuickSearchKey(event)"
+                       placeholder="Rechercher un actif par nom ou ticker…"
+                       autocomplete="off" spellcheck="false"
+                       class="flex-1 bg-transparent text-white text-sm focus:outline-none font-sans placeholder-gray-500">
+                <kbd class="text-[10px] text-gray-500 bg-gray-800 border border-gray-700 rounded px-1.5 py-0.5 font-mono">Échap</kbd>
+            </div>
+            <div id="quick-search-results" class="max-h-[60vh] overflow-y-auto"></div>
+            <div class="px-3 py-2 border-t border-gray-800 bg-gray-950 text-[10px] text-gray-500 flex justify-between">
+                <span><kbd class="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 font-mono">↑</kbd> <kbd class="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 font-mono">↓</kbd> naviguer</span>
+                <span><kbd class="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 font-mono">Entrée</kbd> ouvrir · <kbd class="bg-gray-800 border border-gray-700 rounded px-1 py-0.5 font-mono">Échap</kbd> fermer</span>
+            </div>
+        </div>
+    </div>
+
     <!-- CONTENEUR D'IMPRESSION PDF (caché à l'écran, rempli au clic « Exporter en PDF ») -->
     <div id="print-fiscal-recap"></div>
 
@@ -4244,6 +4970,17 @@
     <script src="app30-timeline.js"></script>
     <script src="app31-esg.js"></script>
     <script src="app32-per.js"></script>
+    <script src="app33-monthly-snapshots.js"></script>
+    <script src="app34-correlation.js"></script>
+    <script src="app35-dca.js"></script>
+    <script src="app36-waterfall.js"></script>
+    <script src="app37-slide-panel.js"></script>
+    <script src="app38-filters.js"></script>
+    <script src="app39-thesis.js"></script>
+    <script src="app40-withdrawal.js"></script>
+    <script src="app41-pwa.js"></script>
+    <script src="app42-dead-lines.js"></script>
+    <script src="app43-mc-worker.js"></script>
     <script src="tests.js"></script>
     <script src="app7-init.js"></script>
 </body>

@@ -1221,6 +1221,2232 @@ _suite('computePerProjection');
 })();
 
 // ---------------------------------------------------------------------
+// TESTS : _currentMonthKey / _monthLabel (Chantier §4)
+// ---------------------------------------------------------------------
+_suite('_currentMonthKey / _monthLabel');
+(function testMonthHelpers() {
+    // _currentMonthKey : format 'YYYY-MM'
+    const key = _currentMonthKey();
+    assertTrue(/^\d{4}-\d{2}$/.test(key), '_currentMonthKey : format YYYY-MM');
+
+    // Vérifie que le mois correspond bien à la date du jour
+    const now = new Date();
+    const expected = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+    assertEq(key, expected, '_currentMonthKey : correspond au mois courant');
+
+    // _monthLabel : conversion humaine
+    assertEq(_monthLabel('2025-01'), 'Jan 2025', '_monthLabel : janvier');
+    assertEq(_monthLabel('2025-12'), 'Déc 2025', '_monthLabel : décembre');
+    assertEq(_monthLabel('2024-06'), 'Juin 2024', '_monthLabel : juin');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : captureMonthlySnapshot
+// ---------------------------------------------------------------------
+_suite('captureMonthlySnapshot');
+(function testCaptureMonthlySnapshot() {
+    // Backup de l'état global + localStorage
+    const backupAssets = assets.slice();
+    const backupSnapshots = localStorage.getItem(MONTHLY_SNAPSHOTS_KEY);
+
+    // Jeu de test minimal : 2 actifs dans 2 cadrans
+    assets.length = 0;
+    assets.push({
+        id: 995001, name: 'Test A', ticker: 'TA',
+        categories: ['Action'], cadran: 'ASIE', envelope: 'CTO',
+        qty: 10, invested: 1000, value: 1500,
+        lots: [{ id: 1, qty: 10, qtyRemaining: 10, price: 100, frais: 0, date: '2024-01-01' }],
+        buys: [], history: []
+    });
+    assets.push({
+        id: 995002, name: 'Test B', ticker: 'TB',
+        categories: ['Or & Métaux'], cadran: 'OR', envelope: '',
+        qty: 5, invested: 500, value: 400,
+        lots: [{ id: 2, qty: 5, qtyRemaining: 5, price: 100, frais: 0, date: '2024-01-01' }],
+        buys: [], history: []
+    });
+
+    // Vide les snapshots pour isoler le test
+    localStorage.removeItem(MONTHLY_SNAPSHOTS_KEY);
+
+    // --- Cas 1 : création ---
+    const snap = captureMonthlySnapshot();
+    assertEq(snap.month, _currentMonthKey(), 'captureMonthlySnapshot : month = mois courant');
+    assertEq(snap.totalValue, 1900, 'captureMonthlySnapshot : totalValue = 1900 €');
+    assertEq(snap.totalInvested, 1500, 'captureMonthlySnapshot : totalInvested = 1500 €');
+    assertEq(snap.pnl, 400, 'captureMonthlySnapshot : pnl = 400 €');
+    assertApprox(snap.pnlPct, 26.67, 0.1, 'captureMonthlySnapshot : pnlPct ≈ 26,67 %');
+    assertEq(snap.positionsCount, 2, 'captureMonthlySnapshot : 2 positions');
+    assertEq(snap.top3.length, 2, 'captureMonthlySnapshot : top3 contient 2 actifs');
+    assertEq(snap.top3[0].ticker, 'TA', 'captureMonthlySnapshot : top = Test A');
+    assertEq(snap.top3[0].pnl, 500, 'captureMonthlySnapshot : top P&L = +500 €');
+
+    // byCadran
+    assertEq(snap.byCadran.ASIE, 1500, 'captureMonthlySnapshot : byCadran.ASIE = 1500 €');
+    assertEq(snap.byCadran.OR, 400, 'captureMonthlySnapshot : byCadran.OR = 400 €');
+
+    // --- Cas 2 : persistance dans localStorage ---
+    const stored = loadMonthlySnapshots();
+    assertEq(stored.length, 1, 'captureMonthlySnapshot : 1 snapshot persisté');
+
+    // --- Cas 3 : mise à jour du même mois (pas de doublon) ---
+    assets[0].value = 2000;
+    const snap2 = captureMonthlySnapshot();
+    const stored2 = loadMonthlySnapshots();
+    assertEq(stored2.length, 1, 'captureMonthlySnapshot : pas de doublon pour le même mois');
+    assertEq(stored2[0].totalValue, 2400, 'captureMonthlySnapshot : mise à jour du snapshot existant');
+
+    // Restaure
+    localStorage.removeItem(MONTHLY_SNAPSHOTS_KEY);
+    if (backupSnapshots) localStorage.setItem(MONTHLY_SNAPSHOTS_KEY, backupSnapshots);
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _enrichSnapshotsWithVariations (MoM / YoY)
+// ---------------------------------------------------------------------
+_suite('_enrichSnapshotsWithVariations');
+(function testEnrichSnapshots() {
+    // Backup
+    const backupSnapshots = localStorage.getItem(MONTHLY_SNAPSHOTS_KEY);
+
+    // Injecte un jeu de 14 snapshots synthétiques :
+    //   - mois : 2025-01 → 2025-12 (12 mois) + 2024-01 + 2024-12
+    //   - totalValue : valeurs simples pour tester MoM et YoY
+    const fakeList = [
+        { month: '2024-01', totalValue: 10000, totalInvested: 9000, pnl: 1000, pnlPct: 11.11, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 1 },
+        { month: '2024-12', totalValue: 11000, totalInvested: 9500, pnl: 1500, pnlPct: 15.79, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 2 },
+        { month: '2025-01', totalValue: 12000, totalInvested: 10000, pnl: 2000, pnlPct: 20.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 3 },
+        { month: '2025-02', totalValue: 12500, totalInvested: 10000, pnl: 2500, pnlPct: 25.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 4 },
+        { month: '2025-03', totalValue: 11800, totalInvested: 10000, pnl: 1800, pnlPct: 18.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 5 },
+        { month: '2025-04', totalValue: 12300, totalInvested: 10000, pnl: 2300, pnlPct: 23.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 6 },
+        { month: '2025-05', totalValue: 13000, totalInvested: 10000, pnl: 3000, pnlPct: 30.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 7 },
+        { month: '2025-06', totalValue: 12800, totalInvested: 10000, pnl: 2800, pnlPct: 28.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 8 },
+        { month: '2025-07', totalValue: 13200, totalInvested: 10000, pnl: 3200, pnlPct: 32.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 9 },
+        { month: '2025-08', totalValue: 13600, totalInvested: 10000, pnl: 3600, pnlPct: 36.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 10 },
+        { month: '2025-09', totalValue: 14000, totalInvested: 10000, pnl: 4000, pnlPct: 40.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 11 },
+        { month: '2025-10', totalValue: 14500, totalInvested: 10000, pnl: 4500, pnlPct: 45.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 12 },
+        { month: '2025-11', totalValue: 15000, totalInvested: 10000, pnl: 5000, pnlPct: 50.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 13 },
+        { month: '2025-12', totalValue: 15500, totalInvested: 10000, pnl: 5500, pnlPct: 55.00, positionsCount: 2, top3: [], flop3: [], byCadran: {}, capturedAt: 14 }
+    ];
+    localStorage.setItem(MONTHLY_SNAPSHOTS_KEY, JSON.stringify(fakeList));
+
+    const enriched = _enrichSnapshotsWithVariations();
+
+    // Tri décroissant : le plus récent en tête
+    assertEq(enriched[0].month, '2025-12', '_enrichSnapshotsWithVariations : tri décroissant (2025-12 en tête)');
+    assertEq(enriched[enriched.length - 1].month, '2024-01', '_enrichSnapshotsWithVariations : 2024-01 en queue');
+
+    // Cas MoM : 2025-02 vs 2025-01 (12500 - 12000 = +500)
+    const feb = enriched.find(s => s.month === '2025-02');
+    assertTrue(feb.mom !== null, '_enrichSnapshotsWithVariations : 2025-02 a un MoM');
+    assertEq(feb.mom.deltaEUR, 500, '_enrichSnapshotsWithVariations : MoM 2025-02 = +500 €');
+    assertApprox(feb.mom.deltaPct, 4.17, 0.01, '_enrichSnapshotsWithVariations : MoM % 2025-02 ≈ +4,17 %');
+
+    // Cas MoM négatif : 2025-03 vs 2025-02 (11800 - 12500 = -700)
+    const mar = enriched.find(s => s.month === '2025-03');
+    assertEq(mar.mom.deltaEUR, -700, '_enrichSnapshotsWithVariations : MoM 2025-03 = -700 €');
+    assertTrue(mar.mom.deltaPct < 0, '_enrichSnapshotsWithVariations : MoM % 2025-03 négatif');
+
+    // Cas MoM null : le premier snapshot (2024-01) n'a pas de MoM
+    const jan24 = enriched.find(s => s.month === '2024-01');
+    assertNull(jan24.mom, '_enrichSnapshotsWithVariations : 2024-01 n\'a pas de MoM (premier)');
+
+    // Cas YoY : 2025-01 vs 2024-01 (12000 - 10000 = +2000) → index 1 de la liste triée ascendante → 12 rangs plus tôt
+    const jan25 = enriched.find(s => s.month === '2025-01');
+    assertTrue(jan25.yoy !== null, '_enrichSnapshotsWithVariations : 2025-01 a un YoY');
+    assertEq(jan25.yoy.deltaEUR, 2000, '_enrichSnapshotsWithVariations : YoY 2025-01 = +2000 €');
+    assertApprox(jan25.yoy.deltaPct, 20.00, 0.01, '_enrichSnapshotsWithVariations : YoY % 2025-01 = +20 %');
+
+    // Cas YoY null : 2024-12 (pas de 2023-12)
+    const dec24 = enriched.find(s => s.month === '2024-12');
+    assertNull(dec24.yoy, '_enrichSnapshotsWithVariations : 2024-12 n\'a pas de YoY');
+
+    // Restaure
+    localStorage.removeItem(MONTHLY_SNAPSHOTS_KEY);
+    if (backupSnapshots) localStorage.setItem(MONTHLY_SNAPSHOTS_KEY, backupSnapshots);
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _pearsonCorrelation (Chantier §5)
+// ---------------------------------------------------------------------
+_suite('_pearsonCorrelation');
+(function testPearsonCorrelation() {
+    // --- Cas 1 : corrélation parfaite +1 (y = 2x) ---
+    const days = [];
+    for (let i = 0; i < 40; i++) {
+        const d = new Date(2025, 0, 1 + i);
+        days.push(d.toISOString().slice(0, 10));
+    }
+    const a1 = { returnsByDay: {} };
+    const b1 = { returnsByDay: {} };
+    days.forEach((day, i) => {
+        const x = Math.sin(i) * 0.01;   // variation pseudo-aléatoire
+        a1.returnsByDay[day] = x;
+        b1.returnsByDay[day] = 2 * x;   // linéairement dépendant
+    });
+    const res1 = _pearsonCorrelation(a1, b1);
+    assertTrue(res1 !== null, '_pearsonCorrelation : +1 calculable');
+    assertApprox(res1.r, 1.0, 0.0001, '_pearsonCorrelation : corrélation parfaite +1');
+    assertEq(res1.n, 40, '_pearsonCorrelation : 40 points alignés');
+
+    // --- Cas 2 : corrélation parfaite -1 (y = -x) ---
+    const a2 = { returnsByDay: {} };
+    const b2 = { returnsByDay: {} };
+    days.forEach((day, i) => {
+        const x = Math.cos(i) * 0.01;
+        a2.returnsByDay[day] = x;
+        b2.returnsByDay[day] = -x;
+    });
+    const res2 = _pearsonCorrelation(a2, b2);
+    assertApprox(res2.r, -1.0, 0.0001, '_pearsonCorrelation : corrélation parfaite -1');
+
+    // --- Cas 3 : corrélation nulle (bruit indépendant) ---
+    // Séquence alternée pour x, constante pour y → cov = 0
+    const a3 = { returnsByDay: {} };
+    const b3 = { returnsByDay: {} };
+    days.forEach((day, i) => {
+        a3.returnsByDay[day] = i % 2 === 0 ? 0.01 : -0.01;
+        b3.returnsByDay[day] = 0.005;   // constante (stdev = 0 → null)
+    });
+    const res3 = _pearsonCorrelation(a3, b3);
+    assertNull(res3, '_pearsonCorrelation : stdev nulle → null');
+
+    // --- Cas 4 : jours insuffisants (< 30) ---
+    const a4 = { returnsByDay: {} };
+    const b4 = { returnsByDay: {} };
+    for (let i = 0; i < 10; i++) {
+        const d = new Date(2025, 0, 1 + i).toISOString().slice(0, 10);
+        a4.returnsByDay[d] = i * 0.001;
+        b4.returnsByDay[d] = i * 0.002;
+    }
+    assertNull(_pearsonCorrelation(a4, b4), '_pearsonCorrelation : 10 jours → null');
+
+    // --- Cas 5 : jours partiellement communs ---
+    // 35 jours communs sur 50 → doit utiliser les 35 communs
+    const a5 = { returnsByDay: {} };
+    const b5 = { returnsByDay: {} };
+    for (let i = 0; i < 50; i++) {
+        const d = new Date(2025, 0, 1 + i).toISOString().slice(0, 10);
+        a5.returnsByDay[d] = Math.sin(i) * 0.01;
+        if (i >= 15) b5.returnsByDay[d] = Math.sin(i) * 0.01;   // 35 communs
+    }
+    const res5 = _pearsonCorrelation(a5, b5);
+    assertTrue(res5 !== null, '_pearsonCorrelation : 35 jours communs → calculable');
+    assertEq(res5.n, 35, '_pearsonCorrelation : n = 35 jours communs');
+    assertApprox(res5.r, 1.0, 0.0001, '_pearsonCorrelation : corrélation +1 sur jours communs');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _detectCorrelationClusters (Chantier §5)
+// ---------------------------------------------------------------------
+_suite('_detectCorrelationClusters');
+(function testDetectClusters() {
+    // --- Cas 1 : clique parfaite de 3 actifs (tous corrélés > 0.85) ---
+    const matrix1 = [
+        [1.00, 0.92, 0.90],
+        [0.92, 1.00, 0.88],
+        [0.90, 0.88, 1.00]
+    ];
+    const assets1 = [
+        { id: 1, ticker: 'AAPL', name: 'Apple' },
+        { id: 2, ticker: 'MSFT', name: 'Microsoft' },
+        { id: 3, ticker: 'NVDA', name: 'Nvidia' }
+    ];
+    const clusters1 = _detectCorrelationClusters(matrix1, assets1);
+    assertEq(clusters1.length, 1, '_detectCorrelationClusters : 1 cluster détecté');
+    assertEq(clusters1[0].size, 3, '_detectCorrelationClusters : taille = 3');
+    assertTrue(clusters1[0].avgR > 0.85, '_detectCorrelationClusters : avgR > 0.85');
+    assertTrue(clusters1[0].tickers.includes('AAPL'), '_detectCorrelationClusters : contient AAPL');
+
+    // --- Cas 2 : cluster de 2 (sous le seuil minimal de 3) → pas de cluster ---
+    const matrix2 = [
+        [1.00, 0.92],
+        [0.92, 1.00]
+    ];
+    const assets2 = [
+        { id: 1, ticker: 'AAA', name: 'A' },
+        { id: 2, ticker: 'BBB', name: 'B' }
+    ];
+    const clusters2 = _detectCorrelationClusters(matrix2, assets2);
+    assertEq(clusters2.length, 0, '_detectCorrelationClusters : 2 actifs → pas de cluster (min 3)');
+
+    // --- Cas 3 : chaîne non-clique (A-B forts, B-C forts, A-C faible) ---
+    // Union-find regroupe A,B,C mais ce n'est PAS une clique → doit être rejeté
+    const matrix3 = [
+        [1.00, 0.90, 0.20],
+        [0.90, 1.00, 0.90],
+        [0.20, 0.90, 1.00]
+    ];
+    const assets3 = [
+        { id: 1, ticker: 'AAA', name: 'A' },
+        { id: 2, ticker: 'BBB', name: 'B' },
+        { id: 3, ticker: 'CCC', name: 'C' }
+    ];
+    const clusters3 = _detectCorrelationClusters(matrix3, assets3);
+    assertEq(clusters3.length, 0, '_detectCorrelationClusters : chaîne non-clique → 0 cluster');
+
+    // --- Cas 4 : deux clusters distincts ---
+    const matrix4 = [
+        //  Cluster 1 : A, B, C           Cluster 2 : D, E, F
+        [1.00, 0.92, 0.90, 0.10, 0.15, 0.05],
+        [0.92, 1.00, 0.88, 0.08, 0.12, 0.10],
+        [0.90, 0.88, 1.00, 0.12, 0.10, 0.08],
+        [0.10, 0.08, 0.12, 1.00, 0.90, 0.88],
+        [0.15, 0.12, 0.10, 0.90, 1.00, 0.92],
+        [0.05, 0.10, 0.08, 0.88, 0.92, 1.00]
+    ];
+    const assets4 = [
+        { id: 1, ticker: 'A', name: 'A' }, { id: 2, ticker: 'B', name: 'B' },
+        { id: 3, ticker: 'C', name: 'C' }, { id: 4, ticker: 'D', name: 'D' },
+        { id: 5, ticker: 'E', name: 'E' }, { id: 6, ticker: 'F', name: 'F' }
+    ];
+    const clusters4 = _detectCorrelationClusters(matrix4, assets4);
+    assertEq(clusters4.length, 2, '_detectCorrelationClusters : 2 clusters distincts');
+    assertEq(clusters4[0].size, 3, '_detectCorrelationClusters : chaque cluster a 3 actifs');
+    assertEq(clusters4[1].size, 3, '_detectCorrelationClusters : second cluster a 3 actifs');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _correlationColor (Chantier §5)
+// ---------------------------------------------------------------------
+_suite('_correlationColor');
+(function testCorrelationColor() {
+    // Cas 1 : NaN → gris
+    assertEq(_correlationColor(NaN), '#1f2937', '_correlationColor : NaN → gris');
+
+    // Cas 2 : r ≈ 0 → gris neutre
+    assertEq(_correlationColor(0), '#374151', '_correlationColor : 0 → gris neutre');
+    assertEq(_correlationColor(0.04), '#374151', '_correlationColor : 0.04 → gris neutre');
+
+    // Cas 3 : r > 0 → couleur rouge (rouge dominant)
+    const colorPos = _correlationColor(0.9);
+    assertTrue(colorPos.startsWith('rgb('), '_correlationColor : r=0.9 → format rgb');
+    const posMatch = colorPos.match(/rgb\((\d+),(\d+),(\d+)\)/);
+    assertTrue(parseInt(posMatch[1]) > parseInt(posMatch[2]), '_correlationColor : r>0 → rouge dominant');
+    assertTrue(parseInt(posMatch[1]) > parseInt(posMatch[3]), '_correlationColor : r>0 → bleu < rouge');
+
+    // Cas 4 : r < 0 → couleur bleue (bleu dominant)
+    const colorNeg = _correlationColor(-0.9);
+    const negMatch = colorNeg.match(/rgb\((\d+),(\d+),(\d+)\)/);
+    assertTrue(parseInt(negMatch[3]) > parseInt(negMatch[1]), '_correlationColor : r<0 → bleu dominant');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : computeCorrelationMatrix (intégration avec realSeriesCache)
+// ---------------------------------------------------------------------
+_suite('computeCorrelationMatrix');
+(function testComputeCorrelationMatrix() {
+    // Backup de l'état global
+    const backupAssets = assets.slice();
+    const backupSeries = realSeriesCache;
+
+    // --- Cas 1 : pas assez d'actifs corrélables → matrice vide ---
+    assets.length = 0;
+    realSeriesCache = {};
+    let m1 = computeCorrelationMatrix();
+    assertEq(m1.assets.length, 0, 'computeCorrelationMatrix : 0 actifs corrélables');
+    assertEq(m1.matrix.length, 0, 'computeCorrelationMatrix : matrice vide');
+    assertEq(m1.clusters.length, 0, 'computeCorrelationMatrix : pas de cluster');
+
+    // --- Cas 2 : un actif isolé → pas de matrice ---
+    assets.push({
+        id: 990001, name: 'Test A', ticker: 'TA',
+        categories: ['Autre'], envelope: '', qty: 1, invested: 100, value: 100,
+        lots: [], buys: [], history: []
+    });
+    realSeriesCache = {
+        'TA': (() => {
+            const s = [];
+            for (let i = 0; i < 40; i++) {
+                s.push({ date: new Date(2025, 0, 1 + i).getTime(), price: 100 + i * 0.5 });
+            }
+            return s;
+        })()
+    };
+    let m2 = computeCorrelationMatrix();
+    assertEq(m2.assets.length, 1, 'computeCorrelationMatrix : 1 actif corrélable');
+    assertEq(m2.pairs.length, 0, 'computeCorrelationMatrix : aucune paire calculable');
+
+    // --- Cas 3 : 3 actifs fortement corrélés → cluster détecté ---
+    assets.push({
+        id: 990002, name: 'Test B', ticker: 'TB',
+        categories: ['Autre'], envelope: '', qty: 1, invested: 100, value: 100,
+        lots: [], buys: [], history: []
+    });
+    assets.push({
+        id: 990003, name: 'Test C', ticker: 'TC',
+        categories: ['Autre'], envelope: '', qty: 1, invested: 100, value: 100,
+        lots: [], buys: [], history: []
+    });
+    // Séries quasi-identiques → corrélation ~ +1
+    const baseSeries = (() => {
+        const s = [];
+        for (let i = 0; i < 40; i++) {
+            s.push({ date: new Date(2025, 0, 1 + i).getTime(), price: 100 + Math.sin(i) * 5 });
+        }
+        return s;
+    })();
+    realSeriesCache = {
+        'TA': baseSeries.map(p => ({ ...p })),
+        'TB': baseSeries.map(p => ({ ...p, price: p.price * 1.01 })),
+        'TC': baseSeries.map(p => ({ ...p, price: p.price * 0.99 }))
+    };
+
+    const m3 = computeCorrelationMatrix();
+    assertEq(m3.assets.length, 3, 'computeCorrelationMatrix : 3 actifs corrélables');
+    assertEq(m3.pairs.length, 3, 'computeCorrelationMatrix : 3 paires (3 choose 2)');
+
+    // Toutes les corrélations doivent être ≈ +1
+    m3.pairs.forEach(p => {
+        assertTrue(p.r > 0.99, `computeCorrelationMatrix : corrélation ${p.i}-${p.j} ≈ +1 (obtenu ${p.r.toFixed(3)})`);
+    });
+
+    // Diagonale = 1
+    for (let i = 0; i < 3; i++) {
+        assertEq(m3.matrix[i][i], 1, `computeCorrelationMatrix : diagonale [${i}][${i}] = 1`);
+    }
+
+    // Cluster détecté (3 actifs corrélés > 0.85)
+    assertEq(m3.clusters.length, 1, 'computeCorrelationMatrix : 1 cluster détecté');
+    assertEq(m3.clusters[0].size, 3, 'computeCorrelationMatrix : cluster de taille 3');
+
+    // --- Cas 4 : cache actif ---
+    const key1 = _computeCorrelationCacheKey();
+    const r1 = getCorrelationMatrix();
+    const r2 = getCorrelationMatrix();
+    assertTrue(r1 === r2, 'getCorrelationMatrix : cache actif (même référence)');
+
+    // Modifie une série → invalide le cache
+    realSeriesCache['TA'] = realSeriesCache['TA'].slice(0, 20);   // < 30 points
+    const key2 = _computeCorrelationCacheKey();
+    assertTrue(key1 !== key2, '_computeCorrelationCacheKey : change après modification de série');
+
+    invalidateCorrelationCache();
+    const r3 = getCorrelationMatrix();
+    assertTrue(r3 !== r1, 'getCorrelationMatrix : nouvelle référence après invalidation');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+    realSeriesCache = backupSeries;
+    invalidateCorrelationCache();
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : computeDcaSuggestedCadran (Chantier §6)
+// ---------------------------------------------------------------------
+_suite('computeDcaSuggestedCadran');
+(function testDcaSuggestedCadran() {
+    // Backup complet
+    const backupAssets = assets.slice();
+    const backupConfig = { ...dcaConfig };
+
+    // --- Cas 1 : portefeuille vide → null ---
+    assets.length = 0;
+    dcaConfig.targetCadran = '';
+    assertNull(computeDcaSuggestedCadran(), 'computeDcaSuggestedCadran : portefeuille vide → null');
+
+    // --- Cas 2 : 4 cadrans équilibrés (gap = 0 partout) ---
+    assets.push({
+        id: 985001, name: 'Actif OR', ticker: 'OR1', cadran: 'OR',
+        categories: ['Or & Métaux'], envelope: '', qty: 1, invested: 1000, value: 1000,
+        lots: [], buys: [], history: []
+    });
+    assets.push({
+        id: 985002, name: 'Actif MON', ticker: 'MON1', cadran: 'MONNAIES',
+        categories: ['Devises/Liquidités'], envelope: '', qty: 1, invested: 1000, value: 1000,
+        lots: [], buys: [], history: []
+    });
+    assets.push({
+        id: 985003, name: 'Actif ASIE', ticker: 'A1', cadran: 'ASIE',
+        categories: ['Action'], envelope: 'CTO', qty: 1, invested: 1000, value: 1000,
+        lots: [], buys: [], history: []
+    });
+    assets.push({
+        id: 985004, name: 'Actif PET', ticker: 'P1', cadran: 'PETROLE',
+        categories: ['Matières Premières'], envelope: '', qty: 1, invested: 1000, value: 1000,
+        lots: [], buys: [], history: []
+    });
+    const r2 = computeDcaSuggestedCadran();
+    assertTrue(r2 !== null, 'computeDcaSuggestedCadran : 4 cadrans équilibrés → non null');
+    assertApprox(r2.pct, 25, 0.01, 'computeDcaSuggestedCadran : chaque cadran à 25 %');
+    assertApprox(r2.gap, 0, 0.01, 'computeDcaSuggestedCadran : gap = 0');
+
+    // --- Cas 3 : un cadran sous-pondéré détecté correctement ---
+    // ASIE passe à 2500 € (portefeuille total = 5500, cible = 1375)
+    // OR = 1000 (gap -375), MON = 1000 (gap -375), ASIE = 2500 (gap +1125), PET = 1000 (gap -375)
+    // Le "premier" trouvé à égalité sera OR ou MON (ordre GAVE_QUADRANTS = OR, MONNAIES, ASIE, PETROLE)
+    // Donc OR est attendu
+    assets[2].value = 2500;
+    const r3 = computeDcaSuggestedCadran();
+    assertTrue(r3 !== null, 'computeDcaSuggestedCadran : avec écart → non null');
+    assertEq(r3.cadran, 'OR', 'computeDcaSuggestedCadran : OR (1er sous-pondéré à égalité)');
+    assertTrue(r3.gap < 0, 'computeDcaSuggestedCadran : gap négatif (sous-pondéré)');
+    assertApprox(r3.pct, 1000 / 5500 * 100, 0.01, 'computeDcaSuggestedCadran : % correct');
+
+    // --- Cas 4 : cadran verrouillé par l'utilisateur ---
+    dcaConfig.targetCadran = 'PETROLE';
+    const r4 = computeDcaSuggestedCadran();
+    assertTrue(r4 !== null, 'computeDcaSuggestedCadran : cadran verrouillé → non null');
+    assertEq(r4.cadran, 'PETROLE', 'computeDcaSuggestedCadran : cadran verrouillé retourné');
+    assertTrue(r4.locked === true, 'computeDcaSuggestedCadran : flag locked = true');
+    assertEq(r4.value, 1000, 'computeDcaSuggestedCadran : valeur du cadran verrouillé');
+
+    // --- Cas 5 : cadran cible invalide → ignoré (fallback auto) ---
+    dcaConfig.targetCadran = 'INVALID_CADRAN';
+    const r5 = computeDcaSuggestedCadran();
+    assertTrue(r5 !== null, 'computeDcaSuggestedCadran : cadran invalide → fallback auto');
+    assertTrue(r5.cadran !== 'INVALID_CADRAN', 'computeDcaSuggestedCadran : cadran invalide ignoré');
+    assertTrue(r5.locked === false, 'computeDcaSuggestedCadran : flag locked = false sur fallback');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+    Object.assign(dcaConfig, backupConfig);
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _shouldTriggerDcaToday (Chantier §6)
+// ---------------------------------------------------------------------
+_suite('_shouldTriggerDcaToday');
+(function testShouldTriggerDcaToday() {
+    const backupConfig = { ...dcaConfig };
+
+    const now = new Date();
+    const todayMonthKey = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+
+    // --- Cas 1 : DCA désactivé → false ---
+    dcaConfig.enabled = false;
+    dcaConfig.dayOfMonth = 1;
+    dcaConfig.lastTriggeredMonth = null;
+    assertFalse(_shouldTriggerDcaToday(), '_shouldTriggerDcaToday : DCA désactivé → false');
+
+    // --- Cas 2 : DCA activé, jour loin dans le futur → false ---
+    dcaConfig.enabled = true;
+    dcaConfig.dayOfMonth = 28;
+    dcaConfig.lastTriggeredMonth = null;
+    // Si on est aujourd'hui le 28 ou plus, le test n'est pas significatif
+    // On teste uniquement si on est en début de mois (jour < 28)
+    if (now.getDate() < 28) {
+        assertFalse(_shouldTriggerDcaToday(), '_shouldTriggerDcaToday : jour futur → false');
+    }
+
+    // --- Cas 3 : jour atteint → true ---
+    dcaConfig.dayOfMonth = 1;
+    assertTrue(_shouldTriggerDcaToday(), '_shouldTriggerDcaToday : jour atteint → true');
+
+    // --- Cas 4 : déjà déclenché ce mois-ci → false ---
+    dcaConfig.lastTriggeredMonth = todayMonthKey;
+    assertFalse(_shouldTriggerDcaToday(), '_shouldTriggerDcaToday : déjà déclenché ce mois → false');
+
+    // --- Cas 5 : déclenché le mois dernier → true ---
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    dcaConfig.lastTriggeredMonth = lastMonth.getFullYear() + '-' +
+        String(lastMonth.getMonth() + 1).padStart(2, '0');
+    assertTrue(_shouldTriggerDcaToday(), '_shouldTriggerDcaToday : déclenché mois dernier → true');
+
+    // Restaure
+    Object.assign(dcaConfig, backupConfig);
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : persistance DCA (load/save)
+// ---------------------------------------------------------------------
+_suite('DCA — persistance');
+(function testDcaPersistence() {
+    // Backup
+    const backupRaw = localStorage.getItem(DCA_STORAGE_KEY);
+    const backupConfig = { ...dcaConfig };
+
+    // --- Cas 1 : pas de config → valeurs par défaut ---
+    localStorage.removeItem(DCA_STORAGE_KEY);
+    const loaded1 = loadDcaConfigFromStorage();
+    assertEq(loaded1.enabled, false, 'loadDcaConfigFromStorage : enabled par défaut = false');
+    assertEq(loaded1.amount, 500, 'loadDcaConfigFromStorage : amount par défaut = 500');
+    assertEq(loaded1.dayOfMonth, 5, 'loadDcaConfigFromStorage : dayOfMonth par défaut = 5');
+
+    // --- Cas 2 : save puis load ---
+    dcaConfig.enabled = true;
+    dcaConfig.amount = 750;
+    dcaConfig.dayOfMonth = 10;
+    dcaConfig.label = 'Test DCA';
+    dcaConfig.targetCadran = 'OR';
+    saveDcaConfigToStorage();
+
+    const loaded2 = loadDcaConfigFromStorage();
+    assertEq(loaded2.enabled, true, 'loadDcaConfigFromStorage : enabled = true');
+    assertEq(loaded2.amount, 750, 'loadDcaConfigFromStorage : amount = 750');
+    assertEq(loaded2.dayOfMonth, 10, 'loadDcaConfigFromStorage : dayOfMonth = 10');
+    assertEq(loaded2.label, 'Test DCA', 'loadDcaConfigFromStorage : label préservé');
+    assertEq(loaded2.targetCadran, 'OR', 'loadDcaConfigFromStorage : targetCadran préservé');
+
+    // --- Cas 3 : JSON invalide → fallback ---
+    localStorage.setItem(DCA_STORAGE_KEY, '{invalid json');
+    const loaded3 = loadDcaConfigFromStorage();
+    assertEq(loaded3.enabled, false, 'loadDcaConfigFromStorage : JSON invalide → défaut');
+
+    // Restaure
+    localStorage.removeItem(DCA_STORAGE_KEY);
+    if (backupRaw) localStorage.setItem(DCA_STORAGE_KEY, backupRaw);
+    Object.assign(dcaConfig, backupConfig);
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : computeWaterfallData (Chantier §7)
+// ---------------------------------------------------------------------
+_suite('computeWaterfallData');
+(function testComputeWaterfallData() {
+    // Backup
+    const backupAssets = assets.slice();
+
+    // --- Cas 1 : portefeuille vide → items vides ---
+    assets.length = 0;
+    const r1 = computeWaterfallData();
+    assertEq(r1.items.length, 0, 'computeWaterfallData : portefeuille vide → items vides');
+    assertEq(r1.totalPnl, 0, 'computeWaterfallData : portefeuille vide → totalPnl = 0');
+    assertEq(r1.positionsCount, 0, 'computeWaterfallData : portefeuille vide → 0 positions');
+
+    // --- Cas 2 : 3 actifs (2 positifs, 1 négatif), sous le seuil TOP_N ---
+    // TOP_N = 6 donc pas de regroupement "Autres"
+    assets.length = 0;
+    assets.push({ id: 970001, name: 'A', ticker: 'AAA', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 1000, value: 1500, lots: [], buys: [], history: [] });
+    assets.push({ id: 970002, name: 'B', ticker: 'BBB', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 500, value: 300,  lots: [], buys: [], history: [] });
+    assets.push({ id: 970003, name: 'C', ticker: 'CCC', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 200, value: 400,  lots: [], buys: [], history: [] });
+
+    // Total = 500 - 200 + 200 = 500
+    const r2 = computeWaterfallData();
+    // items = 3 deltas + 1 total = 4
+    assertEq(r2.items.length, 4, 'computeWaterfallData : 3 deltas + 1 total');
+    assertEq(r2.totalPnl, 500, 'computeWaterfallData : totalPnl = +500 €');
+    assertEq(r2.positionsCount, 3, 'computeWaterfallData : 3 positions');
+
+    // Tri par |delta| décroissant : AAA (+500), BBB (-200), CCC (+200)
+    // Les abs : 500, 200, 200 → AAA en tête
+    assertEq(r2.items[0].label, 'AAA', 'computeWaterfallData : tri par |delta| → AAA en 1er');
+    assertEq(r2.items[0].delta, 500, 'computeWaterfallData : AAA delta = +500 €');
+    assertTrue(r2.items[0].isPos === true, 'computeWaterfallData : AAA isPos = true');
+    assertEq(r2.items[0].start, 0, 'computeWaterfallData : AAA start = 0');
+    assertEq(r2.items[0].end, 500, 'computeWaterfallData : AAA end = 500');
+
+    // --- Cas 3 : vérification du cumul ---
+    // Ordre cumulé : AAA (0→500), BBB (500→300), CCC (300→500)
+    const bbb = r2.items.find(it => it.label === 'BBB');
+    const ccc = r2.items.find(it => it.label === 'CCC');
+    assertTrue(bbb !== undefined, 'computeWaterfallData : BBB présent');
+    assertTrue(ccc !== undefined, 'computeWaterfallData : CCC présent');
+
+    // BBB (-200) doit venir après AAA dans l'ordre de tri (|500| > |200|)
+    // À égalité 200 entre BBB et CCC, l'ordre dépend du sort stable — on ne teste pas l'ordre exact
+    assertTrue(
+        (bbb.start === 500 && bbb.end === 300) || (bbb.start === 300 && bbb.end === 100),
+        'computeWaterfallData : BBB cumul cohérent'
+    );
+
+    // --- Cas 4 : la barre "Total" est toujours la dernière ---
+    const lastItem = r2.items[r2.items.length - 1];
+    assertEq(lastItem.kind, 'total', 'computeWaterfallData : dernière barre = total');
+    assertEq(lastItem.start, 0, 'computeWaterfallData : Total part de 0');
+    assertEq(lastItem.end, 500, 'computeWaterfallData : Total = +500 €');
+    assertEq(lastItem.label, 'Total', 'computeWaterfallData : label = "Total"');
+
+    // --- Cas 5 : regroupement "Autres" quand > TOP_N (6) actifs ---
+    // Ajoute 5 actifs supplémentaires → 8 actifs au total
+    // TOP_N = 6 → 6 affichés + 2 regroupés sous "Autres"
+    assets.length = 0;
+    const deltas = [500, 400, 300, 200, 100, 50, -30, -10];   // 8 actifs
+    deltas.forEach((d, i) => {
+        assets.push({
+            id: 970100 + i,
+            name: 'Actif ' + (i + 1),
+            ticker: 'A' + String(i + 1).padStart(2, '0'),
+            categories: ['Action'], envelope: 'CTO',
+            qty: 1, invested: 1000, value: 1000 + d,
+            lots: [], buys: [], history: []
+        });
+    });
+
+    const r5 = computeWaterfallData();
+    // items = 6 deltas + 1 "Autres" + 1 total = 8
+    assertEq(r5.items.length, 8, 'computeWaterfallData : 6 deltas + Autres + Total');
+
+    // Le dernier delta avant Total doit être "Autres (2)"
+    const otherItem = r5.items.find(it => it.kind === 'other');
+    assertTrue(otherItem !== undefined, 'computeWaterfallData : item "Autres" présent');
+    assertEq(otherItem.childCount, 2, 'computeWaterfallData : "Autres" regroupe 2 actifs');
+    assertEq(otherItem.delta, -40, 'computeWaterfallData : "Autres" delta = -30 + (-10) = -40 €');
+    assertTrue(otherItem.isPos === false, 'computeWaterfallData : "Autres" isPos = false (négatif)');
+    assertTrue(otherItem.label.startsWith('Autres'), 'computeWaterfallData : label commence par "Autres"');
+
+    // Total attendu : 500+400+300+200+100+50-30-10 = 1510
+    assertEq(r5.totalPnl, 1510, 'computeWaterfallData : totalPnl = +1510 €');
+    const last5 = r5.items[r5.items.length - 1];
+    assertEq(last5.end, 1510, 'computeWaterfallData : Total = +1510 €');
+
+    // --- Cas 6 : exclusion des positions papier ---
+    assets.push({
+        id: 970999, name: 'Paper', ticker: 'PPR',
+        categories: ['Action'], envelope: 'CTO',
+        qty: 1, invested: 100, value: 5000,
+        isPaper: true, paperScenarioId: 'default',
+        lots: [], buys: [], history: []
+    });
+    const r6 = computeWaterfallData();
+    assertEq(r6.totalPnl, 1510, 'computeWaterfallData : position papier exclue');
+    assertEq(r6.positionsCount, 8, 'computeWaterfallData : 8 positions réelles (paper exclu)');
+
+    // --- Cas 7 : tous les actifs en perte → total négatif ---
+    assets.length = 0;
+    assets.push({ id: 970201, name: 'X', ticker: 'XX', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 1000, value: 800, lots: [], buys: [], history: [] });
+    assets.push({ id: 970202, name: 'Y', ticker: 'YY', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 500, value: 400, lots: [], buys: [], history: [] });
+    const r7 = computeWaterfallData();
+    assertEq(r7.totalPnl, -300, 'computeWaterfallData : total négatif = -300 €');
+    const last7 = r7.items[r7.items.length - 1];
+    assertTrue(last7.isPos === false, 'computeWaterfallData : Total isPos = false');
+    assertEq(last7.end, -300, 'computeWaterfallData : Total end = -300 €');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : computeWaterfallData — ordre de tri
+// ---------------------------------------------------------------------
+_suite('computeWaterfallData — tri');
+(function testWaterfallSort() {
+    const backupAssets = assets.slice();
+
+    // 5 actifs avec des |delta| bien distincts
+    assets.length = 0;
+    const cases = [
+        { ticker: 'ZZZ', delta: -50 },
+        { ticker: 'AAA', delta: 800 },
+        { ticker: 'MMM', delta: 100 },
+        { ticker: 'BBB', delta: -400 },
+        { ticker: 'CCC', delta: 300 }
+    ];
+    cases.forEach((c, i) => {
+        assets.push({
+            id: 975000 + i,
+            name: 'Test ' + c.ticker,
+            ticker: c.ticker,
+            categories: ['Action'], envelope: 'CTO',
+            qty: 1, invested: 1000, value: 1000 + c.delta,
+            lots: [], buys: [], history: []
+        });
+    });
+
+    const r = computeWaterfallData();
+    const deltas = r.items.filter(it => it.kind === 'delta');
+    // Ordre attendu par |delta| décroissant : AAA (800), BBB (400), CCC (300), MMM (100), ZZZ (50)
+    assertEq(deltas[0].label, 'AAA', 'computeWaterfallData — tri : AAA en 1er (|800|)');
+    assertEq(deltas[1].label, 'BBB', 'computeWaterfallData — tri : BBB en 2ᵉ (|400|)');
+    assertEq(deltas[2].label, 'CCC', 'computeWaterfallData — tri : CCC en 3ᵉ (|300|)');
+    assertEq(deltas[3].label, 'MMM', 'computeWaterfallData — tri : MMM en 4ᵉ (|100|)');
+    assertEq(deltas[4].label, 'ZZZ', 'computeWaterfallData — tri : ZZZ en 5ᵉ (|50|)');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _getNavigableAssetIds (Chantier §8)
+// ---------------------------------------------------------------------
+_suite('_getNavigableAssetIds');
+(function testNavigableAssetIds() {
+    // Backup
+    const backupAssets = assets.slice();
+    const backupFilter = (typeof inventoryFilter !== 'undefined') ? inventoryFilter : 'ALL';
+    const backupSearch = (typeof document !== 'undefined' && document.getElementById('inventory-search'))
+        ? document.getElementById('inventory-search').value
+        : '';
+
+    // Jeu de test : 4 actifs (2 Action CTO, 1 Crypto, 1 Or)
+    assets.length = 0;
+    assets.push({
+        id: 960001, name: 'Apple', ticker: 'AAPL',
+        categories: ['Action'], envelope: 'CTO', cadran: 'ASIE',
+        qty: 1, invested: 100, value: 150, lots: [], buys: [], history: []
+    });
+    assets.push({
+        id: 960002, name: 'Microsoft', ticker: 'MSFT',
+        categories: ['Action'], envelope: 'CTO', cadran: 'ASIE',
+        qty: 1, invested: 100, value: 200, lots: [], buys: [], history: []
+    });
+    assets.push({
+        id: 960003, name: 'Bitcoin', ticker: 'BTC',
+        categories: ['Crypto'], envelope: '', cadran: 'CRYPTO',
+        qty: 1, invested: 100, value: 300, lots: [], buys: [], history: []
+    });
+    assets.push({
+        id: 960004, name: 'Napoléon', ticker: 'NAP20',
+        categories: ['Or & Métaux'], envelope: '', cadran: 'OR',
+        qty: 1, invested: 100, value: 120, lots: [], buys: [], history: []
+    });
+
+    // --- Cas 1 : filtre ALL, pas de recherche → 4 actifs ---
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = 'ALL';
+    const searchEl = document.getElementById('inventory-search');
+    if (searchEl) searchEl.value = '';
+
+    const ids1 = _getNavigableAssetIds();
+    assertEq(ids1.length, 4, '_getNavigableAssetIds : 4 actifs avec filtre ALL');
+
+    // --- Cas 2 : filtre Crypto → 1 actif ---
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = 'Crypto';
+    const ids2 = _getNavigableAssetIds();
+    assertEq(ids2.length, 1, '_getNavigableAssetIds : 1 actif avec filtre Crypto');
+    assertEq(ids2[0], 960003, '_getNavigableAssetIds : filtre Crypto → BTC');
+
+    // --- Cas 3 : filtre Action → 2 actifs ---
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = 'Action';
+    const ids3 = _getNavigableAssetIds();
+    assertEq(ids3.length, 2, '_getNavigableAssetIds : 2 actifs avec filtre Action');
+
+    // --- Cas 4 : filtre ALL + recherche 'apple' → 1 actif ---
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = 'ALL';
+    if (searchEl) searchEl.value = 'apple';
+    const ids4 = _getNavigableAssetIds();
+    assertEq(ids4.length, 1, '_getNavigableAssetIds : recherche "apple" → 1 actif');
+    assertEq(ids4[0], 960001, '_getNavigableAssetIds : recherche "apple" → AAPL');
+
+    // --- Cas 5 : recherche par ticker (insensible à la casse) ---
+    if (searchEl) searchEl.value = 'NAP';
+    const ids5 = _getNavigableAssetIds();
+    assertEq(ids5.length, 1, '_getNavigableAssetIds : recherche "NAP" → 1 actif');
+    assertEq(ids5[0], 960004, '_getNavigableAssetIds : recherche "NAP" → NAP20');
+
+    // --- Cas 6 : filtre CADRAN_OR → 1 actif ---
+    if (searchEl) searchEl.value = '';
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = 'CADRAN_OR';
+    const ids6 = _getNavigableAssetIds();
+    assertEq(ids6.length, 1, '_getNavigableAssetIds : filtre CADRAN_OR → 1 actif');
+    assertEq(ids6[0], 960004, '_getNavigableAssetIds : filtre CADRAN_OR → NAP20');
+
+    // Restaure
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = backupFilter;
+    if (searchEl) searchEl.value = backupSearch;
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _getAdjacentAssetId (Chantier §8)
+// ---------------------------------------------------------------------
+_suite('_getAdjacentAssetId');
+(function testAdjacentAssetId() {
+    const backupAssets = assets.slice();
+    const backupFilter = (typeof inventoryFilter !== 'undefined') ? inventoryFilter : 'ALL';
+
+    assets.length = 0;
+    assets.push({ id: 961001, name: 'A', ticker: 'A', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 100, value: 100, lots: [], buys: [], history: [] });
+    assets.push({ id: 961002, name: 'B', ticker: 'B', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 100, value: 100, lots: [], buys: [], history: [] });
+    assets.push({ id: 961003, name: 'C', ticker: 'C', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 100, value: 100, lots: [], buys: [], history: [] });
+
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = 'ALL';
+
+    // --- Cas 1 : du premier vers suivant ---
+    assertEq(_getAdjacentAssetId(961001, +1), 961002, '_getAdjacentAssetId : 1er → 2ᵉ');
+    // --- Cas 2 : du milieu vers suivant ---
+    assertEq(_getAdjacentAssetId(961002, +1), 961003, '_getAdjacentAssetId : 2ᵉ → 3ᵉ');
+    // --- Cas 3 : du dernier vers suivant → null (extrémité) ---
+    assertNull(_getAdjacentAssetId(961003, +1), '_getAdjacentAssetId : dernier → null (extrémité haute)');
+    // --- Cas 4 : du premier vers précédent → null (extrémité) ---
+    assertNull(_getAdjacentAssetId(961001, -1), '_getAdjacentAssetId : 1er → null (extrémité basse)');
+    // --- Cas 5 : du milieu vers précédent ---
+    assertEq(_getAdjacentAssetId(961002, -1), 961001, '_getAdjacentAssetId : 2ᵉ → 1er');
+
+    // --- Cas 6 : actif non trouvé → retourne le premier ---
+    assertEq(_getAdjacentAssetId(999999, +1), 961001, '_getAdjacentAssetId : actif inconnu → 1er');
+
+    // --- Cas 7 : liste vide → null ---
+    assets.length = 0;
+    assertNull(_getAdjacentAssetId(961001, +1), '_getAdjacentAssetId : liste vide → null');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = backupFilter;
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : setSlidePanelMode / persistance (Chantier §8)
+// ---------------------------------------------------------------------
+_suite('setSlidePanelMode — persistance');
+(function testSlidePanelMode() {
+    // Backup
+    const backupMode = slidePanelMode;
+    const backupRaw = localStorage.getItem(SLIDE_PANEL_MODE_KEY);
+
+    // --- Cas 1 : mode 'slide' → localStorage + classe body ---
+    setSlidePanelMode('slide');
+    assertEq(slidePanelMode, 'slide', 'setSlidePanelMode : variable mise à jour');
+    assertEq(localStorage.getItem(SLIDE_PANEL_MODE_KEY), 'slide', 'setSlidePanelMode : localStorage mis à jour');
+    assertTrue(document.body.classList.contains('slide-panel-mode'), 'setSlidePanelMode : classe body.slide-panel-mode appliquée');
+
+    // --- Cas 2 : mode 'modal' → retire la classe ---
+    setSlidePanelMode('modal');
+    assertEq(slidePanelMode, 'modal', 'setSlidePanelMode : retour au mode modal');
+    assertFalse(document.body.classList.contains('slide-panel-mode'), 'setSlidePanelMode : classe body retirée');
+
+    // --- Cas 3 : mode invalide → ignoré ---
+    setSlidePanelMode('invalid_mode');
+    assertEq(slidePanelMode, 'modal', 'setSlidePanelMode : mode invalide → ignoré');
+
+    // --- Cas 4 : toggle ---
+    toggleSlidePanelMode();
+    assertEq(slidePanelMode, 'slide', 'toggleSlidePanelMode : modal → slide');
+    toggleSlidePanelMode();
+    assertEq(slidePanelMode, 'modal', 'toggleSlidePanelMode : slide → modal');
+
+    // Restaure
+    slidePanelMode = backupMode;
+    if (backupRaw) localStorage.setItem(SLIDE_PANEL_MODE_KEY, backupRaw);
+    else localStorage.removeItem(SLIDE_PANEL_MODE_KEY);
+    document.body.classList.toggle('slide-panel-mode', slidePanelMode === 'slide');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : captureCurrentFilterCriteria (Chantier §9)
+// ---------------------------------------------------------------------
+_suite('captureCurrentFilterCriteria');
+(function testCaptureFilter() {
+    // Backup
+    const backupFilter = (typeof inventoryFilter !== 'undefined') ? inventoryFilter : 'ALL';
+    const searchEl = document.getElementById('inventory-search');
+    const backupSearch = searchEl ? searchEl.value : '';
+    const thresholdEl = document.getElementById('inventory-threshold-input');
+    const backupThreshold = thresholdEl ? thresholdEl.value : '';
+
+    // --- Cas 1 : état par défaut ---
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = 'ALL';
+    if (searchEl) searchEl.value = '';
+    if (thresholdEl) thresholdEl.value = '25';
+
+    const c1 = captureCurrentFilterCriteria();
+    assertEq(c1.search, '', 'captureCurrentFilterCriteria : search vide');
+    assertEq(c1.category, 'ALL', 'captureCurrentFilterCriteria : catégorie par défaut');
+    assertEq(c1.threshold, 25, 'captureCurrentFilterCriteria : seuil par défaut = 25 %');
+
+    // --- Cas 2 : filtre + recherche + seuil ---
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = 'ETF';
+    if (searchEl) searchEl.value = 'world';
+    if (thresholdEl) thresholdEl.value = '40';
+
+    const c2 = captureCurrentFilterCriteria();
+    assertEq(c2.search, 'world', 'captureCurrentFilterCriteria : search capturé');
+    assertEq(c2.category, 'ETF', 'captureCurrentFilterCriteria : catégorie capturée');
+    assertEq(c2.threshold, 40, 'captureCurrentFilterCriteria : seuil capturé');
+
+    // Restaure
+    if (typeof inventoryFilter !== 'undefined') inventoryFilter = backupFilter;
+    if (searchEl) searchEl.value = backupSearch;
+    if (thresholdEl) thresholdEl.value = backupThreshold;
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : CRUD filtres sauvegardés (Chantier §9)
+// ---------------------------------------------------------------------
+_suite('Filtres sauvegardés — CRUD');
+(function testSavedFiltersCrud() {
+    // Backup localStorage
+    const backupRaw = localStorage.getItem(SAVED_FILTERS_KEY);
+
+    // Vide pour isoler
+    localStorage.removeItem(SAVED_FILTERS_KEY);
+    if (typeof _savedFiltersCache !== 'undefined') _savedFiltersCache = null;
+
+    // --- Cas 1 : liste vide au démarrage ---
+    const list1 = loadSavedFilters();
+    assertEq(list1.length, 0, 'loadSavedFilters : liste vide au démarrage');
+
+    // --- Cas 2 : createSavedFilter ---
+    const id1 = createSavedFilter('Mes ETF');
+    assertTrue(id1 !== null, 'createSavedFilter : retourne un id');
+    assertTrue(typeof id1 === 'string' && id1.startsWith('flt_'), 'createSavedFilter : id au bon format');
+
+    const list2 = loadSavedFilters();
+    assertEq(list2.length, 1, 'createSavedFilter : 1 filtre persisté');
+    assertEq(list2[0].name, 'Mes ETF', 'createSavedFilter : nom préservé');
+    assertEq(list2[0].applyCount, 0, 'createSavedFilter : applyCount initial = 0');
+    assertTrue(list2[0].criteria !== undefined, 'createSavedFilter : criteria présent');
+
+    // --- Cas 3 : nom vide → null ---
+    assertNull(createSavedFilter(''), 'createSavedFilter : nom vide → null');
+    assertNull(createSavedFilter('   '), 'createSavedFilter : nom blancs → null');
+    assertNull(createSavedFilter(null), 'createSavedFilter : null → null');
+
+    // --- Cas 4 : renameSavedFilter ---
+    renameSavedFilter(id1, 'Mes ETF Monde');
+    const list3 = loadSavedFilters();
+    assertEq(list3[0].name, 'Mes ETF Monde', 'renameSavedFilter : nom mis à jour');
+
+    // Nom identique → pas de changement
+    renameSavedFilter(id1, 'Mes ETF Monde');
+    assertEq(loadSavedFilters()[0].name, 'Mes ETF Monde', 'renameSavedFilter : nom identique → pas de modif');
+
+    // --- Cas 5 : overwriteSavedFilter ---
+    const filtersBefore = loadSavedFilters();
+    const oldCreatedAt = filtersBefore[0].createdAt;
+
+    // Change l'état puis écrase
+    const searchEl = document.getElementById('inventory-search');
+    const backupSearch = searchEl ? searchEl.value : '';
+    if (searchEl) searchEl.value = 'apple';
+
+    overwriteSavedFilter(id1);
+    const list4 = loadSavedFilters();
+    assertEq(list4[0].criteria.search, 'apple', 'overwriteSavedFilter : criteria mis à jour');
+    assertEq(list4[0].createdAt, oldCreatedAt, 'overwriteSavedFilter : createdAt préservé');
+    assertTrue(list4[0].updatedAt > 0, 'overwriteSavedFilter : updatedAt défini');
+
+    if (searchEl) searchEl.value = backupSearch;
+
+    // --- Cas 6 : deleteSavedFilter (avec confirm) ---
+    const _origConfirm = window.confirm;
+    window.confirm = () => true;   // auto-accept
+
+    deleteSavedFilter(id1);
+    assertEq(loadSavedFilters().length, 0, 'deleteSavedFilter : filtre supprimé');
+
+    window.confirm = _origConfirm;
+
+    // --- Cas 7 : persistance dans localStorage ---
+    const id2 = createSavedFilter('Test persistance');
+    const raw = localStorage.getItem(SAVED_FILTERS_KEY);
+    assertTrue(raw !== null, 'Persistance : clé localStorage présente');
+    const parsed = JSON.parse(raw);
+    assertEq(parsed.length, 1, 'Persistance : 1 filtre dans localStorage');
+    assertEq(parsed[0].id, id2, 'Persistance : id correct');
+
+    // Restaure
+    localStorage.removeItem(SAVED_FILTERS_KEY);
+    if (backupRaw) localStorage.setItem(SAVED_FILTERS_KEY, backupRaw);
+    if (typeof _savedFiltersCache !== 'undefined') _savedFiltersCache = null;
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _quickSearchScore (Chantier §9)
+// ---------------------------------------------------------------------
+_suite('_quickSearchScore');
+(function testQuickSearchScore() {
+    const asset = { id: 1, name: 'Apple Inc.', ticker: 'AAPL' };
+
+    // --- Cas 1 : query vide → score minimal (1) ---
+    assertEq(_quickSearchScore('', asset), 1, '_quickSearchScore : query vide → 1');
+
+    // --- Cas 2 : ticker exact → score maximal (1000) ---
+    assertEq(_quickSearchScore('aapl', asset), 1000, '_quickSearchScore : ticker exact = 1000');
+    assertEq(_quickSearchScore('AAPL', asset), 1000, '_quickSearchScore : ticker exact insensible à la casse');
+
+    // --- Cas 3 : ticker commence par → 800+ ---
+    const s3 = _quickSearchScore('aa', asset);
+    assertTrue(s3 >= 800 && s3 < 1000, '_quickSearchScore : ticker commence par → 800+');
+    assertTrue(s3 > _quickSearchScore('ppl', asset), '_quickSearchScore : préfixe > contenu');
+
+    // --- Cas 4 : nom commence par → 600+ ---
+    const s4 = _quickSearchScore('app', asset);
+    assertTrue(s4 >= 600 && s4 < 800, '_quickSearchScore : nom commence par → 600+');
+
+    // --- Cas 5 : nom contient → 400+ ---
+    const s5 = _quickSearchScore('inc', asset);
+    assertTrue(s5 >= 400 && s5 < 600, '_quickSearchScore : nom contient → 400+');
+
+    // --- Cas 6 : ticker contient → 200+ ---
+    // 'pl' n'est pas en début de ticker mais est contenu dedans
+    const s6 = _quickSearchScore('pl', asset);
+    assertTrue(s6 > 0, '_quickSearchScore : ticker contient → > 0');
+
+    // --- Cas 7 : aucun match → 0 ---
+    assertEq(_quickSearchScore('xyzabc', asset), 0, '_quickSearchScore : pas de match → 0');
+
+    // --- Cas 8 : cohérence d'ordre général ---
+    const exact  = _quickSearchScore('aapl', asset);
+    const prefix = _quickSearchScore('aa', asset);
+    const name   = _quickSearchScore('app', asset);
+    const inside = _quickSearchScore('inc', asset);
+    assertTrue(exact > prefix, '_quickSearchScore : exact > préfixe ticker');
+    assertTrue(prefix > name, '_quickSearchScore : préfixe ticker > préfixe nom');
+    assertTrue(name > inside, '_quickSearchScore : préfixe nom > nom contient');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _buildQuickSearchResults (intégration)
+// ---------------------------------------------------------------------
+_suite('_buildQuickSearchResults');
+(function testBuildQuickSearchResults() {
+    const backupAssets = assets.slice();
+
+    assets.length = 0;
+    assets.push({ id: 950001, name: 'Apple Inc.', ticker: 'AAPL', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 100, value: 200, lots: [], buys: [], history: [] });
+    assets.push({ id: 950002, name: 'Amazon', ticker: 'AMZN', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 100, value: 150, lots: [], buys: [], history: [] });
+    assets.push({ id: 950003, name: 'Microsoft', ticker: 'MSFT', categories: ['Action'], envelope: 'CTO', qty: 1, invested: 100, value: 300, lots: [], buys: [], history: [] });
+    assets.push({ id: 950004, name: 'Bitcoin', ticker: 'BTC', categories: ['Crypto'], envelope: '', qty: 1, invested: 100, value: 5000, lots: [], buys: [], history: [] });
+
+    // --- Cas 1 : query vide → 4 résultats triés par valeur décroissante ---
+    const r1 = _buildQuickSearchResults('');
+    assertEq(r1.length, 4, '_buildQuickSearchResults : query vide → tous');
+    assertEq(r1[0].asset.ticker, 'BTC', '_buildQuickSearchResults : BTC en 1er (plus grosse valeur)');
+    assertEq(r1[1].asset.ticker, 'MSFT', '_buildQuickSearchResults : MSFT en 2ᵉ');
+
+    // --- Cas 2 : query 'A' → 3 résultats (AAPL, AMZN, + autres contenant 'a') ---
+    const r2 = _buildQuickSearchResults('a');
+    assertTrue(r2.length >= 2, '_buildQuickSearchResults : query "a" → plusieurs résultats');
+    assertTrue(r2.every(r => r.score > 0), '_buildQuickSearchResults : tous les résultats ont score > 0');
+
+    // --- Cas 3 : query 'aapl' → exact match en premier ---
+    const r3 = _buildQuickSearchResults('aapl');
+    assertTrue(r3.length >= 1, '_buildQuickSearchResults : "aapl" → au moins 1');
+    assertEq(r3[0].asset.ticker, 'AAPL', '_buildQuickSearchResults : "aapl" → AAPL en tête');
+
+    // --- Cas 4 : query inconnue → 0 résultat ---
+    const r4 = _buildQuickSearchResults('zzzzzz');
+    assertEq(r4.length, 0, '_buildQuickSearchResults : "zzzzzz" → 0 résultat');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : hasThesis / getThesisText / getThesisAgeDays (Chantier §10)
+// ---------------------------------------------------------------------
+_suite('hasThesis / getThesisText');
+(function testHasThesis() {
+    // --- Cas 1 : asset null → false ---
+    assertFalse(hasThesis(null), 'hasThesis : null → false');
+    assertFalse(hasThesis(undefined), 'hasThesis : undefined → false');
+
+    // --- Cas 2 : pas de propriété thesis → false ---
+    assertFalse(hasThesis({ id: 1, name: 'Test' }), 'hasThesis : pas de thesis → false');
+
+    // --- Cas 3 : thesis vide → false ---
+    assertFalse(hasThesis({ thesis: { text: '' } }), 'hasThesis : texte vide → false');
+    assertFalse(hasThesis({ thesis: { text: '   ' } }), 'hasThesis : texte blancs → false');
+    assertFalse(hasThesis({ thesis: { text: null } }), 'hasThesis : texte null → false');
+
+    // --- Cas 4 : thesis valide → true ---
+    assertTrue(hasThesis({ thesis: { text: 'Je détiens pour...' } }), 'hasThesis : texte valide → true');
+
+    // --- getThesisText ---
+    assertEq(getThesisText({ thesis: { text: '  Hello  ' } }), 'Hello', 'getThesisText : trim appliqué');
+    assertEq(getThesisText({ thesis: { text: '' } }), '', 'getThesisText : vide → ""');
+    assertEq(getThesisText(null), '', 'getThesisText : null → ""');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : getThesisAgeDays
+// ---------------------------------------------------------------------
+_suite('getThesisAgeDays');
+(function testThesisAge() {
+    // --- Cas 1 : pas de thèse → null ---
+    assertNull(getThesisAgeDays({ }), 'getThesisAgeDays : pas de thèse → null');
+    assertNull(getThesisAgeDays({ thesis: { text: '' } }), 'getThesisAgeDays : texte vide → null');
+
+    // --- Cas 2 : thèse du jour → 0 jours ---
+    const asset1 = {
+        thesis: {
+            text: 'Test',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            lastReviewedAt: Date.now()
+        }
+    };
+    assertEq(getThesisAgeDays(asset1), 0, 'getThesisAgeDays : aujourd\'hui → 0');
+
+    // --- Cas 3 : thèse de 100 jours → 100 ---
+    const asset2 = {
+        thesis: {
+            text: 'Test',
+            createdAt: Date.now() - 100 * 864e5,
+            updatedAt: Date.now() - 100 * 864e5,
+            lastReviewedAt: Date.now() - 100 * 864e5
+        }
+    };
+    assertEq(getThesisAgeDays(asset2), 100, 'getThesisAgeDays : 100 jours');
+
+    // --- Cas 4 : priorité lastReviewedAt > updatedAt > createdAt ---
+    const asset3 = {
+        thesis: {
+            text: 'Test',
+            createdAt: Date.now() - 200 * 864e5,
+            updatedAt: Date.now() - 100 * 864e5,
+            lastReviewedAt: Date.now() - 50 * 864e5
+        }
+    };
+    assertEq(getThesisAgeDays(asset3), 50, 'getThesisAgeDays : lastReviewedAt prioritaire');
+
+    // --- Cas 5 : lastReviewedAt absent → utilise updatedAt ---
+    const asset4 = {
+        thesis: {
+            text: 'Test',
+            createdAt: Date.now() - 200 * 864e5,
+            updatedAt: Date.now() - 100 * 864e5
+        }
+    };
+    assertEq(getThesisAgeDays(asset4), 100, 'getThesisAgeDays : fallback sur updatedAt');
+
+    // --- Cas 6 : timestamp invalide → null ---
+    const asset5 = {
+        thesis: { text: 'Test', lastReviewedAt: 0 }
+    };
+    assertNull(getThesisAgeDays(asset5), 'getThesisAgeDays : timestamp invalide → null');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : setAssetThesis (Chantier §10)
+// ---------------------------------------------------------------------
+_suite('setAssetThesis');
+(function testSetAssetThesis() {
+    const backupAssets = assets.slice();
+
+    // --- Cas 1 : actif introuvable → false ---
+    assets.length = 0;
+    assertFalse(setAssetThesis(99999, 'Test'), 'setAssetThesis : actif introuvable → false');
+
+    // --- Cas 2 : création d'une thèse ---
+    assets.push({
+        id: 940001, name: 'Test A', ticker: 'TA',
+        categories: ['Action'], envelope: 'CTO',
+        qty: 1, invested: 100, value: 100,
+        lots: [], buys: [], history: []
+    });
+    assertTrue(setAssetThesis(940001, 'Ma thèse de test'), 'setAssetThesis : création → true');
+    assertTrue(hasThesis(assets[0]), 'setAssetThesis : thèse présente');
+    assertEq(assets[0].thesis.text, 'Ma thèse de test', 'setAssetThesis : texte correct');
+    assertTrue(assets[0].thesis.createdAt > 0, 'setAssetThesis : createdAt défini');
+    assertTrue(assets[0].thesis.updatedAt > 0, 'setAssetThesis : updatedAt défini');
+    assertTrue(assets[0].thesis.lastReviewedAt > 0, 'setAssetThesis : lastReviewedAt défini');
+
+    // --- Cas 3 : mise à jour d'une thèse existante ---
+    const originalCreatedAt = assets[0].thesis.createdAt;
+    setAssetThesis(940001, 'Thèse mise à jour');
+    assertEq(assets[0].thesis.text, 'Thèse mise à jour', 'setAssetThesis : texte mis à jour');
+    assertEq(assets[0].thesis.createdAt, originalCreatedAt, 'setAssetThesis : createdAt préservé');
+
+    // --- Cas 4 : trim appliqué ---
+    setAssetThesis(940001, '  Avec espaces  ');
+    assertEq(assets[0].thesis.text, 'Avec espaces', 'setAssetThesis : trim appliqué');
+
+    // --- Cas 5 : troncature à THESIS_MAX_LENGTH ---
+    const longText = 'x'.repeat(THESIS_MAX_LENGTH + 100);
+    setAssetThesis(940001, longText);
+    assertEq(assets[0].thesis.text.length, THESIS_MAX_LENGTH, 'setAssetThesis : tronqué à 500 chars');
+
+    // --- Cas 6 : texte vide → suppression ---
+    setAssetThesis(940001, '');
+    assertFalse(hasThesis(assets[0]), 'setAssetThesis : texte vide → suppression');
+    assertTrue(assets[0].thesis === undefined, 'setAssetThesis : propriété thesis supprimée');
+
+    // --- Cas 7 : null → suppression ---
+    setAssetThesis(940001, 'Re-remplir');
+    setAssetThesis(940001, null);
+    assertFalse(hasThesis(assets[0]), 'setAssetThesis : null → suppression');
+
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : markThesisReviewed (Chantier §10)
+// ---------------------------------------------------------------------
+_suite('markThesisReviewed');
+(function testMarkReviewed() {
+    const backupAssets = assets.slice();
+
+    // --- Cas 1 : actif sans thèse → false ---
+    assets.length = 0;
+    assets.push({
+        id: 941001, name: 'Test B', ticker: 'TB',
+        categories: ['Action'], envelope: 'CTO',
+        qty: 1, invested: 100, value: 100,
+        lots: [], buys: [], history: []
+    });
+    assertFalse(markThesisReviewed(941001), 'markThesisReviewed : sans thèse → false');
+
+    // --- Cas 2 : actif avec thèse → true ---
+    setAssetThesis(941001, 'Ma thèse');
+    // Recule artificiellement la date
+    assets[0].thesis.lastReviewedAt = Date.now() - 100 * 864e5;
+    const oldReviewedAt = assets[0].thesis.lastReviewedAt;
+    assertTrue(markThesisReviewed(941001), 'markThesisReviewed : avec thèse → true');
+    assertTrue(assets[0].thesis.lastReviewedAt > oldReviewedAt, 'markThesisReviewed : date mise à jour');
+
+    // --- Cas 3 : actif introuvable → false ---
+    assertFalse(markThesisReviewed(99999), 'markThesisReviewed : actif introuvable → false');
+
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : detectStaleTheses (Chantier §10)
+// ---------------------------------------------------------------------
+_suite('detectStaleTheses');
+(function testDetectStale() {
+    const backupAssets = assets.slice();
+    assets.length = 0;
+
+    // --- Cas 1 : pas de thèse → pas détecté ---
+    assets.push({
+        id: 942001, name: 'No thesis', ticker: 'NT',
+        categories: ['Action'], envelope: 'CTO',
+        qty: 1, invested: 100, value: 50,   // perte -50 %
+        lots: [], buys: [], history: []
+    });
+    assertEq(detectStaleTheses().length, 0, 'detectStaleTheses : sans thèse → 0');
+
+    // --- Cas 2 : thèse récente + perte → pas détecté ---
+    setAssetThesis(942001, 'Thèse récente');
+    // Force une date récente (< 1 an)
+    assets[0].thesis.lastReviewedAt = Date.now() - 10 * 864e5;
+    assertEq(detectStaleTheses().length, 0, 'detectStaleTheses : thèse récente → 0');
+
+    // --- Cas 3 : thèse ancienne MAIS position en gain → pas détecté ---
+    assets[0].thesis.lastReviewedAt = Date.now() - 500 * 864e5;   // > 1 an
+    assets[0].value = 200;   // gain +100 %
+    assertEq(detectStaleTheses().length, 0, 'detectStaleTheses : thèse ancienne en gain → 0');
+
+    // --- Cas 4 : thèse ancienne + perte → détecté ---
+    assets[0].value = 50;    // perte -50 % (sous le seuil -20 %)
+    const r4 = detectStaleTheses();
+    assertEq(r4.length, 1, 'detectStaleTheses : thèse ancienne + perte → 1');
+    assertEq(r4[0].asset.id, 942001, 'detectStaleTheses : bon actif');
+    assertTrue(r4[0].ageDays >= 500, 'detectStaleTheses : ageDays ≥ 500');
+    assertApprox(r4[0].pnlPct, -50, 0.5, 'detectStaleTheses : pnlPct ≈ -50 %');
+
+    // --- Cas 5 : perte légère (> -20 %) → pas détecté ---
+    assets[0].value = 85;    // perte -15 % (au-dessus du seuil -20 %)
+    assertEq(detectStaleTheses().length, 0, 'detectStaleTheses : perte < 20 % → 0');
+
+    // --- Cas 6 : tri par sévérité décroissante ---
+    assets.length = 0;
+    // Créer 3 actifs avec des profils de sévérité différents
+    const createAsset = (id, name, value, invested, ageDays) => {
+        assets.push({
+            id, name, ticker: name,
+            categories: ['Action'], envelope: 'CTO',
+            qty: 1, invested, value,
+            lots: [], buys: [], history: []
+        });
+        setAssetThesis(id, 'Thèse');
+        const a = assets.find(x => x.id === id);
+        a.thesis.lastReviewedAt = Date.now() - ageDays * 864e5;
+    };
+    createAsset(950001, 'Light', 800, 1000, 400);      // -20 % sur 400 j → seuil juste atteint
+    createAsset(950002, 'Severe', 300, 1000, 800);     // -70 % sur 800 j → très sévère
+    createAsset(950003, 'Medium', 500, 1000, 500);     // -50 % sur 500 j → moyen
+
+    const r6 = detectStaleTheses();
+    assertEq(r6.length, 3, 'detectStaleTheses : 3 détectés');
+    assertEq(r6[0].asset.name, 'Severe', 'detectStaleTheses : "Severe" en 1er (plus critique)');
+    assertEq(r6[2].asset.name, 'Light', 'detectStaleTheses : "Light" en dernier');
+
+    // --- Cas 7 : paper trading exclu ---
+    assets.push({
+        id: 950099, name: 'Paper', ticker: 'PPR',
+        categories: ['Action'], envelope: 'CTO',
+        qty: 1, invested: 1000, value: 100,
+        isPaper: true, paperScenarioId: 'default',
+        lots: [], buys: [], history: [],
+        thesis: { text: 'Test', createdAt: 1, updatedAt: 1, lastReviewedAt: 1 }
+    });
+    const r7 = detectStaleTheses();
+    assertTrue(r7.every(x => !x.asset.isPaper), 'detectStaleTheses : paper exclu');
+
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : thesisBadgeHTML (Chantier §10)
+// ---------------------------------------------------------------------
+_suite('thesisBadgeHTML');
+(function testThesisBadge() {
+    // --- Cas 1 : pas de thèse → chaîne vide ---
+    assertEq(thesisBadgeHTML({ id: 1, name: 'A' }), '', 'thesisBadgeHTML : pas de thèse → ""');
+    assertEq(thesisBadgeHTML({ thesis: { text: '' } }), '', 'thesisBadgeHTML : texte vide → ""');
+
+    // --- Cas 2 : thèse récente + gain → badge indigo normal ---
+    const a1 = {
+        id: 1, name: 'Test', invested: 100, value: 150,
+        thesis: { text: 'Test', createdAt: Date.now() - 10 * 864e5, updatedAt: Date.now() - 10 * 864e5, lastReviewedAt: Date.now() - 10 * 864e5 }
+    };
+    const html1 = thesisBadgeHTML(a1);
+    assertTrue(html1.length > 0, 'thesisBadgeHTML : thèse récente → badge');
+    assertTrue(html1.includes('indigo'), 'thesisBadgeHTML : badge indigo (normal)');
+    assertFalse(html1.includes('amber'), 'thesisBadgeHTML : pas de couleur amber');
+
+    // --- Cas 3 : thèse ancienne + perte → badge amber avec ⚠ ---
+    const a2 = {
+        id: 2, name: 'Test', invested: 1000, value: 500,
+        thesis: { text: 'Test', createdAt: Date.now() - 500 * 864e5, updatedAt: Date.now() - 500 * 864e5, lastReviewedAt: Date.now() - 500 * 864e5 }
+    };
+    const html2 = thesisBadgeHTML(a2);
+    assertTrue(html2.includes('amber'), 'thesisBadgeHTML : thèse stale → badge amber');
+    assertTrue(html2.includes('⚠'), 'thesisBadgeHTML : badge stale contient ⚠');
+
+    // --- Cas 4 : thèse ancienne MAIS en gain → badge indigo normal (pas de ⚠) ---
+    const a3 = {
+        id: 3, name: 'Test', invested: 1000, value: 2000,
+        thesis: { text: 'Test', createdAt: Date.now() - 500 * 864e5, updatedAt: Date.now() - 500 * 864e5, lastReviewedAt: Date.now() - 500 * 864e5 }
+    };
+    const html3 = thesisBadgeHTML(a3);
+    assertTrue(html3.includes('indigo'), 'thesisBadgeHTML : thèse ancienne en gain → indigo (pas de ⚠)');
+    assertFalse(html3.includes('⚠'), 'thesisBadgeHTML : pas de ⚠ si gain');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : Chantier §9 — Simulateur de sortie progressive
+// ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// TESTS : loadWithdrawalConfigFromStorage / saveWithdrawalConfigToStorage
+// ---------------------------------------------------------------------
+_suite('Withdrawal — persistance');
+(function testWithdrawalPersistence() {
+    const backupRaw = localStorage.getItem(WITHDRAWAL_STORAGE_KEY);
+    const backupConfig = { ...withdrawalConfig };
+
+    // --- Cas 1 : pas de config → valeurs par défaut ---
+    localStorage.removeItem(WITHDRAWAL_STORAGE_KEY);
+    const loaded1 = loadWithdrawalConfigFromStorage();
+    assertEq(loaded1.monthlyAmount, 2500, 'loadWithdrawalConfigFromStorage : amount par défaut = 2500');
+    assertEq(loaded1.years, 30, 'loadWithdrawalConfigFromStorage : years par défaut = 30');
+    assertEq(loaded1.expectedReturn, 0.05, 'loadWithdrawalConfigFromStorage : rendement par défaut = 5 %');
+    assertEq(loaded1.inflationRate, 0.02, 'loadWithdrawalConfigFromStorage : inflation par défaut = 2 %');
+    assertEq(loaded1.volOverride, 0, 'loadWithdrawalConfigFromStorage : volOverride par défaut = 0 (auto)');
+
+    // --- Cas 2 : save puis load ---
+    withdrawalConfig.monthlyAmount = 3000;
+    withdrawalConfig.years = 25;
+    withdrawalConfig.expectedReturn = 0.06;
+    withdrawalConfig.inflationRate = 0.025;
+    withdrawalConfig.volOverride = 0.18;
+    saveWithdrawalConfigToStorage();
+
+    const loaded2 = loadWithdrawalConfigFromStorage();
+    assertEq(loaded2.monthlyAmount, 3000, 'Persistance : amount préservé');
+    assertEq(loaded2.years, 25, 'Persistance : years préservé');
+    assertEq(loaded2.expectedReturn, 0.06, 'Persistance : rendement préservé');
+    assertEq(loaded2.inflationRate, 0.025, 'Persistance : inflation préservée');
+    assertEq(loaded2.volOverride, 0.18, 'Persistance : volOverride préservée');
+
+    // --- Cas 3 : JSON invalide → fallback ---
+    localStorage.setItem(WITHDRAWAL_STORAGE_KEY, '{invalid json');
+    const loaded3 = loadWithdrawalConfigFromStorage();
+    assertEq(loaded3.monthlyAmount, 2500, 'JSON invalide → défaut = 2500');
+
+    // Restaure
+    localStorage.removeItem(WITHDRAWAL_STORAGE_KEY);
+    if (backupRaw) localStorage.setItem(WITHDRAWAL_STORAGE_KEY, backupRaw);
+    Object.assign(withdrawalConfig, backupConfig);
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _getWithdrawalVolAnnual — priorité override > réelle > fallback
+// ---------------------------------------------------------------------
+_suite('_getWithdrawalVolAnnual');
+(function testWithdrawalVol() {
+    const backupAssets = assets.slice();
+    const backupConfig = { ...withdrawalConfig };
+
+    // --- Cas 1 : volOverride > 0 → utilise l'override ---
+    withdrawalConfig.volOverride = 0.22;
+    assertApprox(_getWithdrawalVolAnnual(), 0.22, 0.0001, '_getWithdrawalVolAnnual : override utilisé');
+
+    // --- Cas 2 : volOverride = 0 + portefeuille vide → fallback 0.15 ---
+    withdrawalConfig.volOverride = 0;
+    assets.length = 0;
+    assertApprox(_getWithdrawalVolAnnual(), 0.15, 0.0001, '_getWithdrawalVolAnnual : vide → 0.15');
+
+    // --- Cas 3 : volOverride = 0 + 1 seul actif → fallback 0.15 ---
+    //   (computeRiskMetricsFromAssets exige >= 2 actifs réels)
+    assets.push({
+        id: 999000, name: 'Test', ticker: 'TST',
+        categories: ['Autre'], envelope: '',
+        qty: 1, invested: 1000, value: 1000,
+        lots: [], buys: [], history: []
+    });
+    assertApprox(_getWithdrawalVolAnnual(), 0.15, 0.0001, '_getWithdrawalVolAnnual : 1 actif → fallback 0.15');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+    Object.assign(withdrawalConfig, backupConfig);
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : runWithdrawalMonteCarlo — cas portefeuille vide
+// ---------------------------------------------------------------------
+_suite('runWithdrawalMonteCarlo — vide');
+(function testWithdrawalEmpty() {
+    const backupAssets = assets.slice();
+    assets.length = 0;
+
+    const r = runWithdrawalMonteCarlo(100);
+    assertEq(r.successProb, 0, 'runWithdrawalMonteCarlo : vide → successProb = 0');
+    assertEq(r.medianFinal, 0, 'runWithdrawalMonteCarlo : vide → medianFinal = 0');
+    assertEq(r.p10Final, 0, 'runWithdrawalMonteCarlo : vide → p10Final = 0');
+    assertEq(r.p90Final, 0, 'runWithdrawalMonteCarlo : vide → p90Final = 0');
+    assertEq(r.initialCapital, 0, 'runWithdrawalMonteCarlo : vide → initialCapital = 0');
+    assertEq(r.monthlyAmount, 0, 'runWithdrawalMonteCarlo : vide → monthlyAmount = 0');
+    assertEq(r.years, 0, 'runWithdrawalMonteCarlo : vide → years = 0');
+
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : runWithdrawalMonteCarlo — cas nominal (retrait soutenable)
+// ---------------------------------------------------------------------
+_suite('runWithdrawalMonteCarlo — nominal');
+(function testWithdrawalNominal() {
+    const backupAssets = assets.slice();
+    const backupConfig = { ...withdrawalConfig };
+
+    // Portefeuille 1 M€, retrait 2 500 €/mois (= 30 000 €/an = 3 % de
+    // retrait initial). Rendement réel net ≈ 2,94 %/an. → soutenable.
+    assets.length = 0;
+    assets.push({
+        id: 999001, name: 'Test', ticker: 'TST',
+        categories: ['Autre'], envelope: '',
+        qty: 1, invested: 1000000, value: 1000000,
+        lots: [], buys: [], history: []
+    });
+
+    withdrawalConfig.monthlyAmount = 2500;
+    withdrawalConfig.years = 30;
+    withdrawalConfig.expectedReturn = 0.05;
+    withdrawalConfig.inflationRate = 0.02;
+    withdrawalConfig.volOverride = 0.15;
+
+    const r = runWithdrawalMonteCarlo(300);
+
+    // --- Structure du résultat ---
+    assertEq(r.initialCapital, 1000000, 'runWithdrawalMonteCarlo : capital initial = 1 M€');
+    assertEq(r.monthlyAmount, 2500, 'runWithdrawalMonteCarlo : retrait mensuel = 2 500 €');
+    assertEq(r.years, 30, 'runWithdrawalMonteCarlo : horizon = 30 ans');
+    assertEq(r.numPaths, 300, 'runWithdrawalMonteCarlo : numPaths respecté');
+    assertApprox(r.volAnnual, 0.15, 0.001, 'runWithdrawalMonteCarlo : volAnnual = 15 %');
+    // Rendement réel Fisher exact : (1.05 / 1.02) − 1 ≈ 0.02941
+    assertApprox(r.realAnnualReturn, 0.02941, 0.0001, 'runWithdrawalMonteCarlo : rendement réel Fisher ≈ 2,94 %');
+
+    // --- Bornes ---
+    assertTrue(r.successProb >= 0 && r.successProb <= 1, 'runWithdrawalMonteCarlo : successProb ∈ [0, 1]');
+    assertTrue(r.failureCount === r.numPaths - Math.round(r.successProb * r.numPaths),
+        'runWithdrawalMonteCarlo : failureCount cohérent avec successProb');
+
+    // --- Percentiles ordonnés ---
+    assertTrue(r.p10Final <= r.medianFinal, 'runWithdrawalMonteCarlo : P10 ≤ P50');
+    assertTrue(r.medianFinal <= r.p90Final, 'runWithdrawalMonteCarlo : P50 ≤ P90');
+
+    // --- Cas soutenable : probabilité élevée attendue ---
+    // Avec 3 % de retrait initial, le capital tient dans la grande majorité
+    // des scénarios (seuil bas pour absorber la variabilité stochastique).
+    assertTrue(r.successProb >= 0.7,
+        'runWithdrawalMonteCarlo : retrait à 3 % → succès ≥ 70 % (obtenu ' + (r.successProb * 100).toFixed(1) + ' %)');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+    Object.assign(withdrawalConfig, backupConfig);
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : runWithdrawalMonteCarlo — cas insoutenable (retrait massif)
+// ---------------------------------------------------------------------
+_suite('runWithdrawalMonteCarlo — insoutenable');
+(function testWithdrawalUnsustainable() {
+    const backupAssets = assets.slice();
+    const backupConfig = { ...withdrawalConfig };
+
+    // Portefeuille 100 k€, retrait 5 000 €/mois = 60 000 €/an = 60 % de
+    // retrait initial. Épuisement attendu en ~2 ans médian.
+    assets.length = 0;
+    assets.push({
+        id: 999002, name: 'Test2', ticker: 'TS2',
+        categories: ['Autre'], envelope: '',
+        qty: 1, invested: 100000, value: 100000,
+        lots: [], buys: [], history: []
+    });
+
+    withdrawalConfig.monthlyAmount = 5000;
+    withdrawalConfig.years = 30;
+    withdrawalConfig.expectedReturn = 0.05;
+    withdrawalConfig.inflationRate = 0.02;
+    withdrawalConfig.volOverride = 0.15;
+
+    const r = runWithdrawalMonteCarlo(200);
+
+    // --- Cas insoutenable : probabilité très faible ---
+    assertTrue(r.successProb < 0.05,
+        'runWithdrawalMonteCarlo : retrait 60 % → succès < 5 % (obtenu ' + (r.successProb * 100).toFixed(1) + ' %)');
+    assertTrue(r.failureCount > 0, 'runWithdrawalMonteCarlo : failureCount > 0');
+    assertTrue(r.medianDepletionYear !== null, 'runWithdrawalMonteCarlo : médiane d\'épuisement calculée');
+    assertTrue(r.medianDepletionYear < 5,
+        'runWithdrawalMonteCarlo : épuisement médian < 5 ans (obtenu ' + r.medianDepletionYear + ' ans)');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+    Object.assign(withdrawalConfig, backupConfig);
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : runWithdrawalMonteCarlo — clamp des paramètres (years, montants)
+// ---------------------------------------------------------------------
+_suite('runWithdrawalMonteCarlo — clamp');
+(function testWithdrawalClamp() {
+    const backupAssets = assets.slice();
+    const backupConfig = { ...withdrawalConfig };
+
+    assets.length = 0;
+    assets.push({
+        id: 999003, name: 'Test3', ticker: 'TS3',
+        categories: ['Autre'], envelope: '',
+        qty: 1, invested: 10000, value: 10000,
+        lots: [], buys: [], history: []
+    });
+
+    withdrawalConfig.monthlyAmount = 100;
+    withdrawalConfig.expectedReturn = 0.05;
+    withdrawalConfig.inflationRate = 0.02;
+    withdrawalConfig.volOverride = 0.15;
+
+    // --- years = 100 → clampé à 60 (borne haute) ---
+    withdrawalConfig.years = 100;
+    const r1 = runWithdrawalMonteCarlo(30);
+    assertEq(r1.years, 60, 'runWithdrawalMonteCarlo : years > 60 → clampé à 60');
+
+    // --- years = 0 → clampé à 1 (borne basse) ---
+    withdrawalConfig.years = 0;
+    const r2 = runWithdrawalMonteCarlo(30);
+    assertEq(r2.years, 1, 'runWithdrawalMonteCarlo : years = 0 → clampé à 1');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+    Object.assign(withdrawalConfig, backupConfig);
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : getWithdrawalResult — cache et invalidation
+// ---------------------------------------------------------------------
+_suite('getWithdrawalResult — cache');
+(function testWithdrawalCache() {
+    const backupAssets = assets.slice();
+    const backupConfig = { ...withdrawalConfig };
+
+    assets.length = 0;
+    assets.push({
+        id: 999004, name: 'Test4', ticker: 'TS4',
+        categories: ['Autre'], envelope: '',
+        qty: 1, invested: 500000, value: 500000,
+        lots: [], buys: [], history: []
+    });
+
+    withdrawalConfig.monthlyAmount = 1500;
+    withdrawalConfig.years = 20;
+    withdrawalConfig.expectedReturn = 0.05;
+    withdrawalConfig.inflationRate = 0.02;
+    withdrawalConfig.volOverride = 0.15;
+
+    // Invalide par sécurité avant le test
+    invalidateWithdrawalCache();
+
+    // --- Deux appels → même référence (cache actif) ---
+    const r1 = getWithdrawalResult();
+    const r2 = getWithdrawalResult();
+    assertTrue(r1 === r2, 'getWithdrawalResult : cache actif (même référence)');
+
+    // --- Invalidation → nouvelle référence ---
+    invalidateWithdrawalCache();
+    const r3 = getWithdrawalResult();
+    assertTrue(r3 !== r1, 'getWithdrawalResult : nouvelle référence après invalidation');
+
+    // --- L\'invalidation remet bien le cache à zéro ---
+    assertTrue(_withdrawalMcResult !== null, 'invalidateWithdrawalCache : un nouveau calcul a repeuplé le cache');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+    Object.assign(withdrawalConfig, backupConfig);
+    invalidateWithdrawalCache();
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : Chantier #10 — Détection des lignes mortes
+// ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// TESTS : _dlSignalLowWeight
+// ---------------------------------------------------------------------
+_suite('_dlSignalLowWeight');
+(function testSignalLowWeight() {
+    const asset = { value: 500 };
+    const total = 100000;   // 0.5 %
+
+    // --- Bornes du signal ---
+    // 0,1 % → score 100
+    const r01 = _dlSignalLowWeight({ value: 100 }, total);
+    assertEq(r01.points, 100, '_dlSignalLowWeight : 0,1 % → 100 points');
+
+    // 0,5 % → exactement la borne (100 - 0 sur la plage 0,5-1)
+    const r05 = _dlSignalLowWeight({ value: 500 }, total);
+    assertEq(r05.points, 100, '_dlSignalLowWeight : 0,5 % → 100 points (borne haute)');
+
+    // 0,75 % → 80 points (milieu de la plage 100→60)
+    const r075 = _dlSignalLowWeight({ value: 750 }, total);
+    assertApprox(r075.points, 80, 0.1, '_dlSignalLowWeight : 0,75 % → 80 points');
+
+    // 1 % → 60 points (début de la plage 60→0)
+    const r1 = _dlSignalLowWeight({ value: 1000 }, total);
+    assertApprox(r1.points, 60, 0.1, '_dlSignalLowWeight : 1 % → 60 points');
+
+    // 1,5 % → 30 points (milieu de la plage 60→0)
+    const r15 = _dlSignalLowWeight({ value: 1500 }, total);
+    assertApprox(r15.points, 30, 0.1, '_dlSignalLowWeight : 1,5 % → 30 points');
+
+    // 2 % → 0 points
+    const r2 = _dlSignalLowWeight({ value: 2000 }, total);
+    assertEq(r2.points, 0, '_dlSignalLowWeight : 2 % → 0 points');
+
+    // 5 % → 0 points (au-delà)
+    const r5 = _dlSignalLowWeight({ value: 5000 }, total);
+    assertEq(r5.points, 0, '_dlSignalLowWeight : 5 % → 0 points');
+
+    // --- Cas dégénérés ---
+    const rEmpty = _dlSignalLowWeight(asset, 0);
+    assertEq(rEmpty.points, 0, '_dlSignalLowWeight : totalValue = 0 → 0 points');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _dlSignalFlatPerformance
+// ---------------------------------------------------------------------
+_suite('_dlSignalFlatPerformance');
+(function testSignalFlatPerf() {
+    // Actif de 2 ans, perf +2 % → 100 points
+    const flat = {
+        invested: 1000, value: 1020,
+        lots: [{ date: new Date(Date.now() - 2 * 365 * 864e5).toISOString().slice(0, 10), qtyRemaining: 1 }]
+    };
+    assertEq(_dlSignalFlatPerformance(flat).points, 100, '_dlSignalFlatPerformance : +2 % sur 2 ans → 100');
+
+    // Actif de 2 ans, perf -5 % → 100 points (|P&L| < 10)
+    const slightlyNeg = {
+        invested: 1000, value: 950,
+        lots: [{ date: new Date(Date.now() - 2 * 365 * 864e5).toISOString().slice(0, 10), qtyRemaining: 1 }]
+    };
+    assertEq(_dlSignalFlatPerformance(slightlyNeg).points, 100, '_dlSignalFlatPerformance : -5 % sur 2 ans → 100');
+
+    // Actif de 2 ans, perf +20 % → 50 points (milieu de la plage 10→30)
+    const midRange = {
+        invested: 1000, value: 1200,
+        lots: [{ date: new Date(Date.now() - 2 * 365 * 864e5).toISOString().slice(0, 10), qtyRemaining: 1 }]
+    };
+    assertApprox(_dlSignalFlatPerformance(midRange).points, 50, 0.1, '_dlSignalFlatPerformance : +20 % → 50');
+
+    // Actif de 2 ans, perf +30 % → 0 points (borne)
+    const bigGain = {
+        invested: 1000, value: 1300,
+        lots: [{ date: new Date(Date.now() - 2 * 365 * 864e5).toISOString().slice(0, 10), qtyRemaining: 1 }]
+    };
+    assertEq(_dlSignalFlatPerformance(bigGain).points, 0, '_dlSignalFlatPerformance : +30 % → 0');
+
+    // Actif < 1 an → 0 points (grâce de jeunesse)
+    const young = {
+        invested: 1000, value: 1005,
+        lots: [{ date: new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10), qtyRemaining: 1 }]
+    };
+    assertEq(_dlSignalFlatPerformance(young).points, 0, '_dlSignalFlatPerformance : < 1 an → 0');
+
+    // Invested = 0 → 0 points
+    assertEq(_dlSignalFlatPerformance({ invested: 0, value: 0 }).points, 0, '_dlSignalFlatPerformance : invested = 0 → 0');
+
+    // Pas de date connue → 0 points
+    assertEq(_dlSignalFlatPerformance({ invested: 1000, value: 1000, lots: [] }).points, 0, '_dlSignalFlatPerformance : date inconnue → 0');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _dlSignalInactivityAge
+// ---------------------------------------------------------------------
+_suite('_dlSignalInactivityAge');
+(function testSignalInactivity() {
+    // 1 an, perf +5 % → 0 points (< 2 ans)
+    const y1 = {
+        invested: 1000, value: 1050,
+        lots: [{ date: new Date(Date.now() - 1 * 365 * 864e5).toISOString().slice(0, 10), qtyRemaining: 1 }]
+    };
+    assertEq(_dlSignalInactivityAge(y1).points, 0, '_dlSignalInactivityAge : 1 an → 0');
+
+    // 3,5 ans, perf +5 % → ~50 points (milieu de 2→5)
+    const y35 = {
+        invested: 1000, value: 1050,
+        lots: [{ date: new Date(Date.now() - 3.5 * 365 * 864e5).toISOString().slice(0, 10), qtyRemaining: 1 }]
+    };
+    assertApprox(_dlSignalInactivityAge(y35).points, 50, 1, '_dlSignalInactivityAge : 3,5 ans → ~50');
+
+    // 6 ans, perf +5 % → 100 points (> 5 ans)
+    const y6 = {
+        invested: 1000, value: 1050,
+        lots: [{ date: new Date(Date.now() - 6 * 365 * 864e5).toISOString().slice(0, 10), qtyRemaining: 1 }]
+    };
+    assertEq(_dlSignalInactivityAge(y6).points, 100, '_dlSignalInactivityAge : 6 ans → 100');
+
+    // 6 ans mais perf +25 % → 0 points (ligne performante)
+    const winner = {
+        invested: 1000, value: 1250,
+        lots: [{ date: new Date(Date.now() - 6 * 365 * 864e5).toISOString().slice(0, 10), qtyRemaining: 1 }]
+    };
+    assertEq(_dlSignalInactivityAge(winner).points, 0, '_dlSignalInactivityAge : 6 ans +25 % → 0');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _dlSignalFeeRatio
+// ---------------------------------------------------------------------
+_suite('_dlSignalFeeRatio');
+(function testSignalFeeRatio() {
+    // 0,5 % de frais → 0 points
+    assertEq(_dlSignalFeeRatio({ invested: 10000, frais: 50 }).points, 0, '_dlSignalFeeRatio : 0,5 % → 0');
+
+    // 1 % → 0 (borne basse de la plage 1→3)
+    assertEq(_dlSignalFeeRatio({ invested: 10000, frais: 100 }).points, 0, '_dlSignalFeeRatio : 1 % → 0');
+
+    // 2 % → ~30 points (milieu de 0→60)
+    assertApprox(_dlSignalFeeRatio({ invested: 10000, frais: 200 }).points, 30, 0.1, '_dlSignalFeeRatio : 2 % → 30');
+
+    // 3 % → 60 points (fin plage 1)
+    assertApprox(_dlSignalFeeRatio({ invested: 10000, frais: 300 }).points, 60, 0.1, '_dlSignalFeeRatio : 3 % → 60');
+
+    // 4 % → 80 points (milieu plage 60→100)
+    assertApprox(_dlSignalFeeRatio({ invested: 10000, frais: 400 }).points, 80, 0.1, '_dlSignalFeeRatio : 4 % → 80');
+
+    // 5 % → 100 points (borne haute)
+    assertEq(_dlSignalFeeRatio({ invested: 10000, frais: 500 }).points, 100, '_dlSignalFeeRatio : 5 % → 100');
+
+    // 10 % → 100 points (clampé)
+    assertEq(_dlSignalFeeRatio({ invested: 10000, frais: 1000 }).points, 100, '_dlSignalFeeRatio : 10 % → 100');
+
+    // invested = 0 → 0
+    assertEq(_dlSignalFeeRatio({ invested: 0, frais: 100 }).points, 0, '_dlSignalFeeRatio : invested = 0 → 0');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _dlSignalNoThesis
+// ---------------------------------------------------------------------
+_suite('_dlSignalNoThesis');
+(function testSignalNoThesis() {
+    const total = 100000;
+
+    // Avec thèse → 0 points
+    const withThesis = {
+        value: 500,
+        thesis: { text: 'Ma thèse', createdAt: Date.now(), updatedAt: Date.now(), lastReviewedAt: Date.now() }
+    };
+    assertEq(_dlSignalNoThesis(withThesis, total).points, 0, '_dlSignalNoThesis : avec thèse → 0');
+
+    // Sans thèse, poids 0,3 % → 100 points
+    const noThesisSmall = { value: 300 };
+    assertEq(_dlSignalNoThesis(noThesisSmall, total).points, 100, '_dlSignalNoThesis : poids 0,3 % → 100');
+
+    // Sans thèse, poids 1,5 % → 60 points
+    const noThesisMid = { value: 1500 };
+    assertEq(_dlSignalNoThesis(noThesisMid, total).points, 60, '_dlSignalNoThesis : poids 1,5 % → 60');
+
+    // Sans thèse, poids 3 % → 0 points (au-delà)
+    const noThesisBig = { value: 3000 };
+    assertEq(_dlSignalNoThesis(noThesisBig, total).points, 0, '_dlSignalNoThesis : poids 3 % → 0');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : computeDeadLineScore — score global sur un cas construit
+// ---------------------------------------------------------------------
+_suite('computeDeadLineScore');
+(function testComputeDeadLineScore() {
+    const backupAssets = assets.slice();
+
+    // Portefeuille cible : 1 M€ dont 100 k€ dans l'actif test = 10 %.
+    // Actif : investi 100 k€, valeur 102 k€ (+2 %), détenu depuis 3 ans,
+    // frais 3 % (3 k€), sans thèse.
+    assets.length = 0;
+    assets.push({
+        id: 998001, name: 'Portefeuille principal', ticker: 'PRINC',
+        categories: ['Autre'], envelope: '', cadran: 'HORS_GAVE',
+        cadrans: { primary: 'HORS_GAVE', secondary: [] },
+        qty: 1, invested: 900000, value: 900000,
+        lots: [], buys: [], history: []
+    });
+    assets.push({
+        id: 998002, name: 'Ligne test', ticker: 'TST',
+        categories: ['Autre'], envelope: '', cadran: 'HORS_GAVE',
+        cadrans: { primary: 'HORS_GAVE', secondary: [] },
+        qty: 1, invested: 100000, value: 102000, frais: 3000,
+        lots: [{ id: 1, date: new Date(Date.now() - 3 * 365 * 864e5).toISOString().slice(0, 10), qty: 1, qtyRemaining: 1, price: 97000, frais: 3000, reference: '' }],
+        buys: [], history: []
+    });
+
+    const asset = assets[1];
+    const total = 1002000;
+    const r = computeDeadLineScore(asset, total);
+
+    // --- Structure ---
+    assertTrue(r !== null, 'computeDeadLineScore : résultat non null');
+    assertTrue(Number.isFinite(r.score), 'computeDeadLineScore : score numérique');
+    assertTrue(r.score >= 0 && r.score <= 100, 'computeDeadLineScore : score ∈ [0, 100]');
+
+    // --- 6 signaux présents ---
+    const expectedKeys = ['lowWeight', 'flatPerformance', 'inactivityAge', 'feeRatio', 'lowAssetScore', 'noThesis'];
+    expectedKeys.forEach(k => {
+        assertTrue(r.details[k] !== undefined, `computeDeadLineScore : signal ${k} présent`);
+        assertTrue(Number.isFinite(r.details[k].points), `computeDeadLineScore : signal ${k} → points numériques`);
+    });
+
+    // --- Vérif individuelle des signaux sur ce cas ---
+    // Poids = 102000/1002000 ≈ 10,2 % → 0 points
+    assertEq(r.details.lowWeight.points, 0, 'computeDeadLineScore : poids 10 % → signal lowWeight à 0');
+    // Perf = +2 % sur 3 ans → 100 points
+    assertEq(r.details.flatPerformance.points, 100, 'computeDeadLineScore : perf plate → 100');
+    // Ancienneté 3 ans, perf +2 % → ~33 points
+    assertTrue(r.details.inactivityAge.points > 20 && r.details.inactivityAge.points < 50,
+        'computeDeadLineScore : ancienneté 3 ans → points intermédiaires');
+    // Frais = 3000/100000 = 3 % → 60 points
+    assertApprox(r.details.feeRatio.points, 60, 0.1, 'computeDeadLineScore : frais 3 % → 60');
+    // Sans thèse, poids 10 % → 0 points (au-delà de 2 %)
+    assertEq(r.details.noThesis.points, 0, 'computeDeadLineScore : sans thèse mais poids 10 % → 0');
+
+    // --- Score attendu ---
+    // Calcul mental : 0*0.25 + 100*0.25 + 33*0.15 + 60*0.10 + ?*0.15 + 0*0.10
+    // = 25 + 5 + 6 + ~0.15*lowAssetScore
+    // => entre 36 et 60 (large). On vérifie juste que le score est > 20.
+    assertTrue(r.score > 20, 'computeDeadLineScore : score > 20 pour ce cas (obtenu ' + r.score + ')');
+
+    // --- Flag critical ---
+    assertEq(r.isCritical, r.score >= DEAD_LINE_CRITICAL_THRESHOLD,
+        'computeDeadLineScore : isCritical cohérent avec le seuil');
+
+    // --- Cas sans totalValue (fallback sur assets global) ---
+    const rAuto = computeDeadLineScore(asset);
+    assertTrue(rAuto !== null, 'computeDeadLineScore : fonctionne sans totalValue explicite');
+
+    // --- Cas null ---
+    assertNull(computeDeadLineScore(null), 'computeDeadLineScore : null → null');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : detectDeadLines — portefeuille entier
+// ---------------------------------------------------------------------
+_suite('detectDeadLines');
+(function testDetectDeadLines() {
+    const backupAssets = assets.slice();
+
+    // --- Cas 1 : portefeuille vide → liste vide ---
+    assets.length = 0;
+    const r1 = detectDeadLines();
+    assertEq(r1.lines.length, 0, 'detectDeadLines : vide → 0 ligne');
+    assertEq(r1.counts.total, 0, 'detectDeadLines : vide → count 0');
+    assertEq(r1.totalValue, 0, 'detectDeadLines : vide → totalValue 0');
+
+    // --- Cas 2 : portefeuille sain → aucune ligne morte ---
+    assets.push({
+        id: 997001, name: 'Sain', ticker: 'SAIN',
+        categories: ['Autre'], envelope: '',
+        cadrans: { primary: 'HORS_GAVE', secondary: [] },
+        qty: 1, invested: 10000, value: 15000, frais: 10,
+        lots: [{ id: 1, date: new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10), qty: 1, qtyRemaining: 1, price: 9990, frais: 10, reference: '' }],
+        buys: [], history: []
+    });
+    const r2 = detectDeadLines();
+    assertEq(r2.lines.length, 0, 'detectDeadLines : portefeuille sain → 0 ligne');
+    assertEq(r2.counts.critical, 0, 'detectDeadLines : portefeuille sain → 0 critique');
+
+    // --- Cas 3 : ligne très morte ajoutée → détectée ---
+    assets.push({
+        id: 997002, name: 'Morte', ticker: 'MORTE',
+        categories: ['Autre'], envelope: '',
+        cadrans: { primary: 'HORS_GAVE', secondary: [] },
+        qty: 1, invested: 500, value: 505, frais: 25,
+        lots: [{ id: 1, date: new Date(Date.now() - 4 * 365 * 864e5).toISOString().slice(0, 10), qty: 1, qtyRemaining: 1, price: 475, frais: 25, reference: '' }],
+        buys: [], history: []
+    });
+    const r3 = detectDeadLines();
+    assertEq(r3.lines.length, 1, 'detectDeadLines : 1 ligne morte détectée');
+    assertEq(r3.lines[0].asset.id, 997002, 'detectDeadLines : la bonne ligne est identifiée');
+    assertTrue(r3.lines[0].score >= 40, 'detectDeadLines : score ≥ seuil (obtenu ' + r3.lines[0].score + ')');
+    assertTrue(r3.potentialCapital > 0, 'detectDeadLines : capital concerné > 0');
+
+    // --- Cas 4 : seuil abaissé → plus de lignes détectées ---
+    const r4 = detectDeadLines({ threshold: 5 });
+    assertTrue(r4.lines.length >= r3.lines.length, 'detectDeadLines : seuil abaissé → au moins autant de lignes');
+
+    // --- Cas 5 : seuil relevé → moins de lignes ---
+    const r5 = detectDeadLines({ threshold: 99 });
+    assertEq(r5.lines.length, 0, 'detectDeadLines : seuil 99 → aucune ligne');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : markDeadLineReviewed / unmarkDeadLineReviewed
+// ---------------------------------------------------------------------
+_suite('markDeadLineReviewed / unmarkDeadLineReviewed');
+(function testDeadLineReview() {
+    const backupAssets = assets.slice();
+    const backupStorage = localStorage.getItem('patriMonial_assets');
+
+    // Prépare un actif mort réutilisable
+    assets.length = 0;
+    assets.push({
+        id: 996001, name: 'Morte', ticker: 'MORTE',
+        categories: ['Autre'], envelope: '',
+        cadrans: { primary: 'HORS_GAVE', secondary: [] },
+        qty: 1, invested: 500, value: 505, frais: 25,
+        lots: [{ id: 1, date: new Date(Date.now() - 4 * 365 * 864e5).toISOString().slice(0, 10), qty: 1, qtyRemaining: 1, price: 475, frais: 25, reference: '' }],
+        buys: [], history: []
+    });
+
+    // --- Cas 1 : actif introuvable → false ---
+    assertFalse(markDeadLineReviewed(999999), 'markDeadLineReviewed : actif introuvable → false');
+    assertFalse(unmarkDeadLineReviewed(999999), 'unmarkDeadLineReviewed : actif introuvable → false');
+
+    // --- Cas 2 : détection initiale → 1 ligne morte ---
+    let r = detectDeadLines();
+    assertEq(r.lines.length, 1, 'markDeadLineReviewed : 1 ligne détectée avant marquage');
+
+    // --- Cas 3 : marquage → exclue de la détection ---
+    assertTrue(markDeadLineReviewed(996001), 'markDeadLineReviewed : retourne true');
+    assertTrue(assets[0].deadLineReviewedAt > 0, 'markDeadLineReviewed : timestamp posé');
+
+    r = detectDeadLines();
+    assertEq(r.lines.length, 0, 'markDeadLineReviewed : ligne exclue après marquage');
+
+    // --- Cas 4 : includeReviewed = true → réapparaît ---
+    r = detectDeadLines({ includeReviewed: true });
+    assertEq(r.lines.length, 1, 'detectDeadLines : includeReviewed → ligne réaffichée');
+    assertTrue(r.lines[0].isReviewed === true, 'detectDeadLines : flag isReviewed = true');
+
+    // --- Cas 5 : annulation du marquage → réapparaît normalement ---
+    assertTrue(unmarkDeadLineReviewed(996001), 'unmarkDeadLineReviewed : retourne true');
+    assertTrue(assets[0].deadLineReviewedAt === undefined, 'unmarkDeadLineReviewed : propriété supprimée');
+
+    r = detectDeadLines();
+    assertEq(r.lines.length, 1, 'unmarkDeadLineReviewed : ligne de nouveau détectée');
+
+    // Restaure
+    assets.length = 0;
+    backupAssets.forEach(a => assets.push(a));
+    if (backupStorage) {
+        try { localStorage.setItem('patriMonial_assets', backupStorage); } catch (_) {}
+    } else {
+        try { localStorage.removeItem('patriMonial_assets'); } catch (_) {}
+    }
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : computeDeadLineScore — cohérence des pondérations
+// ---------------------------------------------------------------------
+_suite('computeDeadLineScore — pondérations');
+(function testWeightsCoherence() {
+    // Vérifie que la somme des poids vaut bien 1.0 (détecte une régression
+    // silencieuse si quelqu'un modifie DEAD_LINE_WEIGHTS sans renormaliser)
+    const sum = Object.values(DEAD_LINE_WEIGHTS).reduce((a, b) => a + b, 0);
+    assertApprox(sum, 1.0, 0.0001, 'DEAD_LINE_WEIGHTS : somme = 1.0');
+
+    // Vérifie les 6 clés attendues
+    const keys = Object.keys(DEAD_LINE_WEIGHTS).sort();
+    const expected = ['feeRatio', 'flatPerformance', 'inactivityAge', 'lowAssetScore', 'lowWeight', 'noThesis'].sort();
+    assertEq(JSON.stringify(keys), JSON.stringify(expected),
+        'DEAD_LINE_WEIGHTS : les 6 clés attendues sont présentes');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : Chantier #13 — Web Worker Monte-Carlo
+// ---------------------------------------------------------------------
+
+// ---------------------------------------------------------------------
+// TESTS : _isWorkerSupported — détection de support
+// ---------------------------------------------------------------------
+_suite('MCWorker — détection de support');
+(function testWorkerSupport() {
+    // L'API Worker est disponible dans tous les navigateurs cibles. En
+    // environnement de test (DevTools ou page réelle), le support doit
+    // être activé — sinon c'est que le test tourne dans un contexte
+    // exotique (Worker lui-même, Node.js…).
+    const supported = _isWorkerSupported();
+    assertTrue(typeof supported === 'boolean', '_isWorkerSupported : retourne un booléen');
+
+    // Cohérence avec l'état du module
+    const status = getMCWorkerStatus();
+    assertEq(status.supported, supported, 'getMCWorkerStatus : supported = _isWorkerSupported()');
+
+    // En contexte réel (page HTTP/HTTPS), le support doit être true
+    assertTrue(supported, '_isWorkerSupported : true en contexte HTTP/HTTPS');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _runWithdrawalSync — validation des payloads
+// ---------------------------------------------------------------------
+_suite('MCWorker — _runWithdrawalSync validation');
+(function testSyncValidation() {
+    // --- Cas 1 : current invalide ---
+    const r1 = _runWithdrawalSync({
+        current: 0, monthlyAmount: 100, months: 12,
+        meanMonthly: 0.005, volMonthly: 0.01, numPaths: 10
+    });
+    assertEq(r1.error, 'invalid_current', '_runWithdrawalSync : current=0 → invalid_current');
+
+    const r2 = _runWithdrawalSync({
+        current: -100, monthlyAmount: 100, months: 12,
+        meanMonthly: 0.005, volMonthly: 0.01, numPaths: 10
+    });
+    assertEq(r2.error, 'invalid_current', '_runWithdrawalSync : current<0 → invalid_current');
+
+    // --- Cas 2 : months invalide ---
+    const r3 = _runWithdrawalSync({
+        current: 10000, monthlyAmount: 100, months: 0,
+        meanMonthly: 0.005, volMonthly: 0.01, numPaths: 10
+    });
+    assertEq(r3.error, 'invalid_months', '_runWithdrawalSync : months=0 → invalid_months');
+
+    const r4 = _runWithdrawalSync({
+        current: 10000, monthlyAmount: 100, months: -1,
+        meanMonthly: 0.005, volMonthly: 0.01, numPaths: 10
+    });
+    assertEq(r4.error, 'invalid_months', '_runWithdrawalSync : months<0 → invalid_months');
+
+    // --- Cas 3 : numPaths invalide ---
+    const r5 = _runWithdrawalSync({
+        current: 10000, monthlyAmount: 100, months: 12,
+        meanMonthly: 0.005, volMonthly: 0.01, numPaths: 0
+    });
+    assertEq(r5.error, 'invalid_numPaths', '_runWithdrawalSync : numPaths=0 → invalid_numPaths');
+
+    const r6 = _runWithdrawalSync({
+        current: 10000, monthlyAmount: 100, months: 12,
+        meanMonthly: 0.005, volMonthly: 0.01, numPaths: -5
+    });
+    assertEq(r6.error, 'invalid_numPaths', '_runWithdrawalSync : numPaths<0 → invalid_numPaths');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _runWithdrawalSync — structure du résultat
+// ---------------------------------------------------------------------
+_suite('MCWorker — _runWithdrawalSync structure');
+(function testSyncStructure() {
+    // Cas nominal : 1 M€, retrait 2500 €/mois, 30 ans, vol 15 %
+    const r = _runWithdrawalSync({
+        current: 1000000,
+        monthlyAmount: 2500,
+        months: 360,
+        meanMonthly: 0.0294 / 12,     // ~2,94 %/an réel
+        volMonthly: 0.15 / Math.sqrt(12),
+        numPaths: 200
+    });
+
+    // --- Aucune erreur ---
+    assertTrue(r.error === undefined, '_runWithdrawalSync : pas d\'erreur sur payload valide');
+
+    // --- Toutes les clés attendues ---
+    const expectedKeys = ['successProb', 'failureCount', 'medianFinal', 'p10Final', 'p90Final', 'medianDepletionYear'];
+    expectedKeys.forEach(k => {
+        assertTrue(r[k] !== undefined, `_runWithdrawalSync : clé ${k} présente`);
+    });
+
+    // --- Bornes ---
+    assertTrue(r.successProb >= 0 && r.successProb <= 1, '_runWithdrawalSync : successProb ∈ [0, 1]');
+    assertTrue(r.failureCount >= 0 && r.failureCount <= 200, '_runWithdrawalSync : failureCount ∈ [0, numPaths]');
+    assertEq(r.successProb * 200 + r.failureCount, 200, '_runWithdrawalSync : successProb + failureCount cohérents');
+
+    // --- Percentiles ordonnés ---
+    assertTrue(r.p10Final <= r.medianFinal, '_runWithdrawalSync : P10 ≤ P50');
+    assertTrue(r.medianFinal <= r.p90Final, '_runWithdrawalSync : P50 ≤ P90');
+
+    // --- Cas soutenable : probabilité élevée attendue ---
+    assertTrue(r.successProb >= 0.7,
+        '_runWithdrawalSync : retrait 3 % → succès ≥ 70 % (obtenu ' + (r.successProb * 100).toFixed(1) + ' %)');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : _runWithdrawalSync — cas insoutenable
+// ---------------------------------------------------------------------
+_suite('MCWorker — _runWithdrawalSync insoutenable');
+(function testSyncUnsustainable() {
+    // 100 k€ avec retrait 5000 €/mois = 60 % / an → épuisement quasi certain
+    const r = _runWithdrawalSync({
+        current: 100000,
+        monthlyAmount: 5000,
+        months: 360,
+        meanMonthly: 0.0294 / 12,
+        volMonthly: 0.15 / Math.sqrt(12),
+        numPaths: 100
+    });
+
+    assertTrue(r.successProb < 0.10,
+        '_runWithdrawalSync : retrait 60 % → succès < 10 % (obtenu ' + (r.successProb * 100).toFixed(1) + ' %)');
+    assertTrue(r.failureCount > 0, '_runWithdrawalSync : failureCount > 0');
+    assertTrue(r.medianDepletionYear !== null, '_runWithdrawalSync : médiane d\'épuisement calculée');
+    assertTrue(r.medianDepletionYear < 5,
+        '_runWithdrawalSync : épuisement médian < 5 ans (obtenu ' + r.medianDepletionYear + ')');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : getMCWorkerStatus / terminateMCWorker / resetMCWorkerState
+// ---------------------------------------------------------------------
+_suite('MCWorker — gestion d\'état');
+(function testWorkerStateManagement() {
+    // --- Cas 1 : état initial ---
+    const s1 = getMCWorkerStatus();
+    assertTrue(typeof s1 === 'object', 'getMCWorkerStatus : retourne un objet');
+    assertTrue(typeof s1.supported === 'boolean', 'getMCWorkerStatus : supported est un booléen');
+    assertTrue(typeof s1.initialized === 'boolean', 'getMCWorkerStatus : initialized est un booléen');
+    assertTrue(typeof s1.broken === 'boolean', 'getMCWorkerStatus : broken est un booléen');
+    assertTrue(typeof s1.pendingCount === 'number', 'getMCWorkerStatus : pendingCount est un nombre');
+    assertTrue(s1.pendingCount >= 0, 'getMCWorkerStatus : pendingCount ≥ 0');
+
+    // --- Cas 2 : terminateMCWorker ne casse rien (idempotent) ---
+    assertDoesNotThrow(() => terminateMCWorker(), 'terminateMCWorker : ne lève pas');
+    assertDoesNotThrow(() => terminateMCWorker(), 'terminateMCWorker : idempotent');
+
+    const s2 = getMCWorkerStatus();
+    assertEq(s2.initialized, false, 'terminateMCWorker : initialized = false après terminaison');
+    assertEq(s2.pendingCount, 0, 'terminateMCWorker : plus aucune requête pendante');
+
+    // --- Cas 3 : resetMCWorkerState remet tout à zéro ---
+    assertDoesNotThrow(() => resetMCWorkerState(), 'resetMCWorkerState : ne lève pas');
+
+    const s3 = getMCWorkerStatus();
+    assertEq(s3.broken, false, 'resetMCWorkerState : broken = false après reset');
+    assertEq(s3.initialized, false, 'resetMCWorkerState : initialized = false après reset');
+    assertEq(s3.pendingCount, 0, 'resetMCWorkerState : pendingCount = 0 après reset');
+})();
+
+// ---------------------------------------------------------------------
+// TESTS : runMCWithdrawalAsync — API publique
+// ---------------------------------------------------------------------
+_suite('MCWorker — runMCWithdrawalAsync');
+(function testAsyncApi() {
+    // L'API doit exister et retourner une Promise
+    assertTrue(typeof runMCWithdrawalAsync === 'function', 'runMCWithdrawalAsync : fonction globale exposée');
+
+    // Payload invalide → la promesse doit être résolue avec un objet { error }
+    // (le fallback sync renvoie l'erreur plutôt que de rejeter)
+    const p = runMCWithdrawalAsync({
+        current: 0, monthlyAmount: 100, months: 12,
+        meanMonthly: 0.005, volMonthly: 0.01, numPaths: 10
+    });
+    assertTrue(p && typeof p.then === 'function', 'runMCWithdrawalAsync : retourne une Promise');
+})();
+
+// ---------------------------------------------------------------------
 // LANCEUR
 // ---------------------------------------------------------------------
 function runTests(options = {}) {

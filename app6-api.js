@@ -619,6 +619,17 @@ async function refreshRealPriceHistory() {
     // calculateRiskMetrics() en fin de traitement — le skeleton est alors
     // écrasé par le rendu réel de renderInventoryTable().
     await primeRealVolCache();
+
+    // Chantier §5 — invalide la matrice de corrélation : de nouvelles séries
+    // réelles viennent d'être chargées, les corrélations doivent être
+    // recalculées au prochain rendu du dashboard.
+    if (typeof invalidateCorrelationCache === 'function') {
+        invalidateCorrelationCache();
+    }
+    if (typeof activeTab !== 'undefined' && activeTab === 'tab-dashboard' &&
+        typeof renderCorrelationSection === 'function') {
+        renderCorrelationSection();
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -666,8 +677,19 @@ function primeRealVolCache() {
         if (anyNewSeries && typeof _sparklineCache !== 'undefined' && _sparklineCache.clear) {
             _sparklineCache.clear();
         }
+        // Chantier §5 — invalide la matrice de corrélation si de nouvelles
+        // séries ont été chargées (les cours réels alimentent le calcul).
+        if (anyNewSeries && typeof invalidateCorrelationCache === 'function') {
+            invalidateCorrelationCache();
+        }
         if (typeof renderInventoryTable === 'function') renderInventoryTable();
         if (typeof calculateRiskMetrics === 'function') calculateRiskMetrics();
+        // Re-render la matrice si l'onglet dashboard est actif et que de
+        // nouvelles séries ont été chargées.
+        if (anyNewSeries && typeof activeTab !== 'undefined' && activeTab === 'tab-dashboard' &&
+            typeof renderCorrelationSection === 'function') {
+            renderCorrelationSection();
+        }
     });
 }
 
@@ -944,6 +966,14 @@ function refreshAllUI() {
         if (typeof renderCw8Comparison === 'function') renderCw8Comparison();
         // Chantier §3 — scoring ESG du portefeuille
         if (typeof renderEsgDashboardSection === 'function') renderEsgDashboardSection();
+        // Chantier §4 — rapport de performance mensuel
+        if (typeof renderMonthlySnapshotsSection === 'function') renderMonthlySnapshotsSection();
+        // Chantier §5 — matrice de corrélation
+        if (typeof renderCorrelationSection === 'function') renderCorrelationSection();
+        // Chantier §7 — waterfall du P&L
+        if (typeof renderWaterfallSection === 'function') renderWaterfallSection();
+        // Chantier #10 — détection des petites lignes mortes
+        if (typeof renderDeadLinesSection === 'function') renderDeadLinesSection();
     }
     // tab-accueil : uniquement les KPI banners — pas de graphique à initialiser
     else if (activeTab === 'tab-gave') initGaveDonutChart();
@@ -952,6 +982,10 @@ function refreshAllUI() {
         renderGoalsTab();
         // Chantier §3 — simulateur PER (rendu automatique sur l'onglet Objectifs)
         if (typeof renderPerPanel === 'function') renderPerPanel();
+        // Chantier §6 — panneau DCA planifié
+        if (typeof renderDcaPanel === 'function') renderDcaPanel();
+        // Chantier §9 — simulateur de sortie progressive
+        if (typeof renderWithdrawalPanel === 'function') renderWithdrawalPanel();
     }
     else if (activeTab === 'tab-watchlist' && typeof renderWatchlistTab === 'function') renderWatchlistTab();
     else if (activeTab === 'tab-annee-n1' && typeof renderTaxOptimizer === 'function') renderTaxOptimizer();
@@ -983,6 +1017,14 @@ function refreshAllUI() {
 
     // Suggestions intelligentes (Chantier L)
     if (typeof renderSuggestions === 'function') renderSuggestions();
+
+    // Chantier §6 — évaluation DCA (throttled 1 h, cooldown 1 mois)
+    if (typeof evaluateDca === 'function') evaluateDca();
+
+    // Chantier §10 — section "Thèses à revoir" (uniquement sur l'accueil)
+    if (activeTab === 'tab-accueil' && typeof renderThesesReviewSection === 'function') {
+        renderThesesReviewSection();
+    }
 }
 
 // =====================================================================

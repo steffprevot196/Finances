@@ -348,6 +348,9 @@ function renderGoalsTab() {
 
     // Chantier 1.9 — rendu du panneau FIRE (indépendant des objectifs classiques)
     if (typeof renderFirePanel === 'function') renderFirePanel();
+
+    // Chantier §6 — rendu du panneau DCA planifié
+    if (typeof renderDcaPanel === 'function') renderDcaPanel();
 }
 
 // ---------------------------------------------------------------------

@@ -223,6 +223,98 @@ window.addEventListener('DOMContentLoaded', () => {
         initPerModule();
     }
 
+    // 8n-septies. Chantier §4 — initialisation du rapport mensuel
+    //              Crée le snapshot du mois courant s'il n'existe pas encore.
+    //              Le rendu est déclenché par refreshAllUI() quand l'onglet
+    //              dashboard est actif.
+    if (typeof initMonthlySnapshotsModule === 'function') {
+        initMonthlySnapshotsModule();
+    }
+
+    // 8n-octies. Chantier §5 — initialisation de la matrice de corrélation
+    //             Le calcul utilise realSeriesCache (déjà peuplé par
+    //             primeRealVolCache). Le rendu est déclenché par
+    //             refreshAllUI() quand l'onglet dashboard est actif.
+    if (typeof initCorrelationModule === 'function') {
+        initCorrelationModule();
+    }
+
+    // 8n-nonies. Chantier §6 — initialisation du DCA planifié
+    //              Le check initial est throttlé (1 h) et différé de 3 s
+    //              pour ne pas gêner le premier rendu. Les évaluations
+    //              suivantes sont déclenchées par refreshAllUI.
+    if (typeof initDcaModule === 'function') {
+        initDcaModule();
+    }
+
+    // 8n-decies. Chantier §7 — initialisation du waterfall du P&L
+    //             Le rendu est déclenché par refreshAllUI() quand l'onglet
+    //             dashboard est actif. Aucune initialisation lourde.
+    if (typeof initWaterfallModule === 'function') {
+        initWaterfallModule();
+    }
+
+    // 8n-undecies. Chantier §8 — initialisation du slide-in panel
+    //              Injecte le CSS + attache le listener clavier ← / →
+    //              + restaure la préférence modale (modal centré vs slide-in).
+    if (typeof initSlidePanelModule === 'function') {
+        initSlidePanelModule();
+    }
+
+    // 8n-duodecies. Chantier §9 — initialisation des filtres sauvegardés
+    //               + palette Ctrl+P. Le rendu du menu est fait au boot,
+    //               la palette est ouverte à la demande (Ctrl+P).
+    if (typeof initSavedFiltersModule === 'function') {
+        initSavedFiltersModule();
+    }
+
+    // 8n-terdecies. Chantier §10 — initialisation du module de thèses
+    //               Le panel est injecté dynamiquement à l'ouverture du
+    //               modal de détail actif. La section "Thèses à revoir"
+    //               est rendue par refreshAllUI sur l'onglet Accueil.
+    if (typeof initThesisModule === 'function') {
+        initThesisModule();
+    }
+
+    // 8n-quaterdecies. Chantier §9 — initialisation du simulateur de sortie
+    //                  progressive (retirement drawdown). Charge la config
+    //                  depuis localStorage ; le rendu du panneau est
+    //                  déclenché par refreshAllUI sur l'onglet Objectifs.
+    if (typeof initWithdrawalModule === 'function') {
+        initWithdrawalModule();
+    }
+
+    // 8n-quindecies. Chantier #12 — initialisation du module PWA.
+    //                • Capture l'événement beforeinstallprompt (bouton
+    //                  "Installer" dans le header si éligible).
+    //                • Traite les raccourcis du manifest (?tab=xxx)
+    //                  différemment du reste du boot (250 ms de délai).
+    //                • Écoute les mises à jour du Service Worker pour
+    //                  proposer un reload non intrusif.
+    //                ⚠ Ne réenregistre PAS le SW : c'est le rôle de
+    //                  registerServiceWorker() dans app15-notifications.js,
+    //                  appelé juste au-dessus (bloc "19. NOTIFICATIONS SYSTÈME").
+    if (typeof initPwaModule === 'function') {
+        initPwaModule();
+    }
+
+    // 8n-sexdecies. Chantier #10 — initialisation du détecteur de lignes
+    //               mortes. Aucun chargement asynchrone : tout est calculé
+    //               à la volée par refreshAllUI sur l'onglet dashboard.
+    if (typeof initDeadLinesModule === 'function') {
+        initDeadLinesModule();
+    }
+
+    // 8n-septdecies. Chantier #13 — initialisation du wrapper Web Worker
+    //                Monte-Carlo. Aucune action au boot : le Worker est
+    //                instancié lazy au premier appel de
+    //                runMCWithdrawalAsync() depuis le panneau Withdrawal.
+    //                Ce log permet juste de vérifier la disponibilité du
+    //                support dans la console.
+    if (typeof initMcWorkerModule === 'function') {
+        initMcWorkerModule();
+    }
+
     // Hook sur refreshBenchmarkSeries : dès que le benchmark est
     // téléchargé ou rafraîchi, on recalcule le comparateur CW8 et on
     // re-rend si l'onglet dashboard est actif.
@@ -476,12 +568,19 @@ window.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-    // 11. Raccourcis clavier globaux : Ctrl+K (palette), Ctrl+Z (undo), Échap
+    // 11. Raccourcis clavier globaux : Ctrl+K (palette), Ctrl+P (recherche rapide), Ctrl+Z (undo), Échap
     document.addEventListener('keydown', (e) => {
         // Ctrl+K / Cmd+K → palette de commandes
         if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
             e.preventDefault();
             openCommandPalette();
+            return;
+        }
+        // Ctrl+P / Cmd+P → recherche rapide d'actifs (Chantier §9)
+        // (on empêche le comportement natif du navigateur qui ouvre l'impression)
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p' && !e.shiftKey) {
+            e.preventDefault();
+            if (typeof openQuickSearch === 'function') openQuickSearch();
             return;
         }
         // Ctrl+Z / Cmd+Z → annuler la dernière action destructive.
