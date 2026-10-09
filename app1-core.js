@@ -187,8 +187,17 @@ let lotShowSold   = true;     // afficher les lots totalement vendus ?
 let lastRiskMetrics        = {};
 let realVolCache           = {};
 let realSeriesCache        = {};
-let finnhubApiKey          = localStorage.getItem('patriMonial_finnhubKey') || '';
-let twelveDataApiKey       = localStorage.getItem('patriMonial_twelveDataKey') || '';
+// ── SECURITY ── Les clés Finnhub et Twelve Data ne sont PLUS persistées
+// dans localStorage (lisibles par tout script de même origine / extension).
+// Elles vivent en mémoire volatile, perdues au rechargement de la page.
+// Un utilisateur doit les ressaisir une fois par session.
+let finnhubApiKey          = '';
+let twelveDataApiKey       = '';
+try {
+    // Purge des anciennes clés persistées (migration de sécurité).
+    localStorage.removeItem('patriMonial_finnhubKey');
+    localStorage.removeItem('patriMonial_twelveDataKey');
+} catch (_) { /* silencieux */ }
 
 // Seuil de concentration (poids max d'un actif dans le portefeuille).
 // Au-delà : un badge ⚠ s'affiche sur la ligne / carte de l'actif.
@@ -442,6 +451,16 @@ function escapeHTML(str) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+}
+
+// --- Sécurité : génération d'arguments sûrs pour les handlers inline ---
+// Les handlers du type `onclick="fn('${id}')"` sont vulnérables même avec
+// escapeHTML : le navigateur HTML-décode l'attribut AVANT de le parser
+// comme JS, donc `&#39;` redevient `'` et casse le littéral de chaîne.
+// Le seul pattern sûr est : JSON.stringify (échappe le JS) + escapeHTML
+// (échappe le HTML). Cette fonction encapsule ce double échappement.
+function safeInlineArg(v) {
+    return escapeHTML(JSON.stringify(v));
 }
 
 // --- Formatage des quantités (grands nombres crypto, fractions d'onces…) ---
@@ -847,7 +866,45 @@ function isSecurityAsset(a) {
 // =====================================================================
 // NORMALISATION / MIGRATION D'UN ACTIF
 // =====================================================================
+
+// ---------------------------------------------------------------------
+// SECURITY — Coercition d'un identifiant en nombre (protection XSS stocké)
+// ---------------------------------------------------------------------
+// Les IDs sont interpolés dans des handlers inline :
+//   onclick="fn(${asset.id})"   (app2-ui.js, app3-charts.js, app5-fiscal.js…)
+// Un JSON importé contenant un `id` de type chaîne casserait la quote et
+// permettrait d'injecter du code exécutable. On force systématiquement
+// un nombre fini strictement positif, sinon on génère un nouvel ID.
+function _safeId(v, fallback) {
+    if (typeof v === 'number' && Number.isFinite(v) && v > 0) return v;
+    if (typeof v === 'string' && /^\d+$/.test(v)) {
+        const n = Number(v);
+        if (Number.isFinite(n) && n > 0) return n;
+    }
+    return (fallback !== undefined)
+        ? fallback
+        : (Date.now() + Math.floor(Math.random() * 100000));
+}
+
+// ---------------------------------------------------------------------
+// NORMALISATION D'UN ARBITRAGE
+// ---------------------------------------------------------------------
+// Les arbitrages ne passent pas par migrateAssetToV2 : on leur applique
+// juste la coercition d'ID (même menace que pour les actifs / cessions).
+function normalizeArbitrage(arb) {
+    if (!arb || typeof arb !== 'object') return arb;
+    arb.id      = _safeId(arb.id);
+    arb.date    = arb.date || '';
+    arb.source  = String(arb.source || '');
+    arb.destination = String(arb.destination || '');
+    arb.montant = Number(arb.montant) || 0;
+    arb.motif   = String(arb.motif || '');
+    return arb;
+}
+
 function normalizeAsset(a) {
+    // ── SECURITY ── Coercition de l'ID racine AVANT tout traitement
+    a.id = _safeId(a.id);
     // Tags (categories)
     if (!Array.isArray(a.categories) || a.categories.length === 0) {
         a.categories = tagsFromLegacy(a.category, a.isETF === true, a.name);
@@ -902,7 +959,7 @@ a.cadran = a.cadrans.primary;
     a.dividends = a.dividends
         .filter(d => d && d.date && Number.isFinite(Number(d.amount)))
         .map(d => ({
-            id:          d.id || (Date.now() + Math.floor(Math.random() * 100000)),
+            id:          _safeId(d.id),
             date:        d.date,
             amount:      Number(d.amount) || 0,
             currency:    (d.currency || 'EUR').toUpperCase(),
@@ -955,7 +1012,7 @@ a.cadran = a.cadrans.primary;
     a.splits = a.splits
         .filter(s => s && s.date && Number.isFinite(Number(s.ratio)) && Number(s.ratio) > 0)
         .map(s => ({
-            id:        s.id || (Date.now() + Math.floor(Math.random() * 100000)),
+            id:        _safeId(s.id),
             date:      s.date,
             ratio:     Number(s.ratio),
             note:      s.note || '',
@@ -986,8 +1043,9 @@ a.cadran = a.cadrans.primary;
             )];
         }
     } else {
-        // Nettoyage : s'assurer que chaque lot a `reference`, `qty` et `qtyRemaining`
+        // Nettoyage : ID numérique + champs obligatoires présents
         a.lots.forEach(l => {
+            l.id = _safeId(l.id);                              // ── SECURITY ──
             if (l.reference === undefined) l.reference = '';
             if (l.qty === undefined)       l.qty = l.qtyRemaining || 0;
             if (l.qtyRemaining === undefined) l.qtyRemaining = l.qty || 0;
@@ -1013,6 +1071,9 @@ function migrateAssetToV2(a) {
 }
 
 function normalizeCession(c) {
+    // ── SECURITY ── Coercition de l'ID avant tout traitement
+    c.id = _safeId(c.id);
+
     if (c.enveloppe !== undefined) {
         c.envelope = c.envelope || LEGACY_ENVELOPE_MAP[c.enveloppe] || c.enveloppe;
         delete c.enveloppe;
@@ -1672,9 +1733,12 @@ function renderPaperScenarioMenu() {
     list.innerHTML = paperScenarios.map(s => {
         const isCurrent = s.id === currentPaperScenarioId;
         const count = assets.filter(a => isPaperAsset(a) && a.paperScenarioId === s.id).length;
+        const safeId = safeInlineArg(s.id);
+        // Validation de la couleur (anti-injection CSS dans style="")
+        const safeColor = HEX_COLOR_RE.test(String(s.color || '')) ? s.color : PAPER_FALLBACK_COLOR;
         return `<div class="flex items-center justify-between border-b border-gray-800/60 last:border-b-0 ${isCurrent ? 'bg-purple-950/30' : ''}">
-            <button onclick="setCurrentPaperScenario('${s.id}'); closePaperScenarioMenu();" class="flex-1 text-left min-w-0 flex items-center gap-2 p-2.5 hover:bg-gray-800/50 transition">
-                <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${s.color};"></span>
+            <button onclick="setCurrentPaperScenario(${safeId}); closePaperScenarioMenu();" class="flex-1 text-left min-w-0 flex items-center gap-2 p-2.5 hover:bg-gray-800/50 transition">
+                <span class="w-3 h-3 rounded-full flex-shrink-0" style="background:${safeColor};"></span>
                 <span class="min-w-0 flex-1">
                     <span class="block text-xs font-medium ${isCurrent ? 'text-white' : 'text-gray-300'} truncate">${escapeHTML(s.name)}</span>
                     <span class="block text-[10px] text-gray-500 font-mono">${count} position(s) · créé le ${new Date(s.createdAt).toLocaleDateString('fr-FR')}</span>
@@ -1682,8 +1746,8 @@ function renderPaperScenarioMenu() {
                 ${isCurrent ? '<i class="fa-solid fa-circle-check text-purple-400 text-[10px]"></i>' : ''}
             </button>
             <div class="flex gap-0.5 flex-shrink-0 pr-1.5">
-                <button onclick="event.stopPropagation(); renamePaperScenarioUI('${s.id}')" class="p-1.5 text-gray-500 hover:text-purple-400 transition" title="Renommer"><i class="fa-solid fa-pen text-[10px]"></i></button>
-                ${paperScenarios.length > 1 ? `<button onclick="event.stopPropagation(); deletePaperScenario('${s.id}')" class="p-1.5 text-gray-500 hover:text-rose-400 transition" title="Supprimer"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
+                <button onclick="event.stopPropagation(); renamePaperScenarioUI(${safeId})" class="p-1.5 text-gray-500 hover:text-purple-400 transition" title="Renommer"><i class="fa-solid fa-pen text-[10px]"></i></button>
+                ${paperScenarios.length > 1 ? `<button onclick="event.stopPropagation(); deletePaperScenario(${safeId})" class="p-1.5 text-gray-500 hover:text-rose-400 transition" title="Supprimer"><i class="fa-solid fa-trash text-[10px]"></i></button>` : ''}
             </div>
         </div>`;
     }).join('');
@@ -2260,8 +2324,10 @@ function handleImportJSON(e) {
             taxTMI = newTaxTMI;
 
             // Migration v1 -> v2 si nécessaire (ajoute lots, reference, cadran, etc.)
+            // + coercition des IDs (protection XSS stocké via handlers inline)
             assets.forEach(a => migrateAssetToV2(a));
             cessions.forEach(normalizeCession);
+            arbitrages.forEach(normalizeArbitrage);
 
             // Persistance
             saveToStorage(); saveCessions(); saveArbitrages(); saveTaxSettings();

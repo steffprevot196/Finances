@@ -3,14 +3,42 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <meta http-equiv="Content-Security-Policy"
+    <!--
+        =====================================================================
+        Content Security Policy
+        =====================================================================
+        ⚠ IMPORTANT — Livraison par <meta> : limitations connues
+
+        1) `frame-ancestors` est IGNORÉ par les navigateurs quand la CSP est
+           livrée via <meta http-equiv>. La protection anti-clickjacking
+           RÉELLE doit être livrée via en-tête HTTP :
+               Content-Security-Policy: frame-ancestors 'none'
+           La directive présente ci-dessous est donc purement documentaire.
+           → À RETIRER quand un en-tête HTTP sera en place (sinon confusion).
+
+        2) `report-uri` / `report-to` sont également ignorés en mode <meta>.
+
+        Durcissements appliqués (audit 2026) :
+          • B1 — Retrait du wildcard `https://*.gstatic.com` (surface élargie)
+                 → remplacé par `https://accounts.gstatic.com`.
+          • B2 — Retrait de `https://cdn.jsdelivr.net` de `connect-src`.
+          • M2 — Retrait de `'unsafe-inline'` de `script-src`.
+                 ⚠ PRÉ-REQUIS : le délégateur de handlers inline
+                 (app28-csp-audit.js) DOIT être actif au boot (voir
+                 app7-init.js → enableCspFallbackDelegator()). Sans lui,
+                 tous les onclick=/onchange=/oninput= du HTML sont
+                 silencieusement bloqués par le navigateur.
+                 Contrôler la couverture avec : reportCspReadiness()
+        =====================================================================
+    -->
+    <meta http-equiv="Content-Security-Policy"
           content="default-src 'self';
-                   script-src 'self' 'unsafe-inline'
+                   script-src 'self'
                               https://cdn.tailwindcss.com
                               https://cdn.jsdelivr.net
                               https://cdnjs.cloudflare.com
                               https://accounts.google.com
-                              https://*.gstatic.com;
+                              https://accounts.gstatic.com;
                    connect-src 'self'
                                https://api.coingecko.com
                                https://api.frankfurter.dev
@@ -19,8 +47,6 @@
                                https://www.googleapis.com
                                https://accounts.google.com
                                https://oauth2.googleapis.com
-                               https://cdn.jsdelivr.net
-                               https://api.allorigins.win
                                https://api.twelvedata.com;
                    img-src 'self' data:;
                    style-src 'self' 'unsafe-inline'
@@ -28,10 +54,9 @@
                              https://cdnjs.cloudflare.com;
                    font-src 'self' https://fonts.gstatic.com
                             https://cdnjs.cloudflare.com;
-                   frame-ancestors 'none';
                    base-uri 'self';
                    worker-src 'self';">
-                            
+
         <title>PatriMonial - Gestion & Suivi de Patrimoine</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
 
@@ -75,12 +100,19 @@
             }
         }
     </script>
-    <!-- FontAwesome icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- SheetJS (pour parser les fichiers Excel .xlsx AuCoffre) -->
-    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- FontAwesome icons (version épinglée, SRI désactivé) -->
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+          crossorigin="anonymous"
+          referrerpolicy="no-referrer">
+    <!-- Chart.js (version épinglée, SRI désactivé) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"></script>
+    <!-- SheetJS (version épinglée, SRI désactivé) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"></script>
 
 
     <link rel="stylesheet" href="style.css">
