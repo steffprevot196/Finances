@@ -4453,26 +4453,17 @@
                         </div>
                         <div>
                             <label class="block text-gray-400 mb-1">Courtier / Plateforme</label>
-                            <select id="add-broker-select" onchange="onBrokerSelectChange()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500">
-                                <option value="">— Aucun —</option>
-                                <option value="Boursorama">Boursorama</option>
-                                <option value="Bourse Direct">Bourse Direct</option>
-                                <option value="Fortuneo">Fortuneo</option>
-                                <option value="Trade Republic">Trade Republic</option>
-                                <option value="Interactive Brokers">Interactive Brokers</option>
-                                <option value="Degiro">Degiro</option>
-                                <option value="Saxo Banque">Saxo Banque</option>
-                                <option value="Binance">Binance</option>
-                                <option value="Coinbase">Coinbase</option>
-                                <option value="Kraken">Kraken</option>
-                                <option value="Ledger">Ledger</option>
-                                <option value="AuCoffre.com">AuCoffre.com</option>
-                                <option value="Linxea">Linxea</option>
-                                <option value="Yomoni">Yomoni</option>
-                                <option value="Nalo">Nalo</option>
-                                <option value="__custom__">➕ Autre (saisir manuellement)</option>
-                            </select>
-                            <input type="text" id="add-broker-custom" placeholder="Nom du courtier / plateforme" autocomplete="off" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500 mt-1.5 hidden">
+                            <div class="flex gap-1.5">
+                                <select id="add-broker-select" onchange="onBrokerSelectChange()" class="flex-1 min-w-0 bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500">
+                                    <option value="">— Aucun —</option>
+                                </select>
+                                <button type="button" onclick="promptAddBroker()" class="w-9 h-9 rounded-lg bg-emerald-950/60 text-emerald-300 border border-emerald-800/50 hover:bg-emerald-900/70 transition flex items-center justify-center flex-shrink-0" title="Ajouter un nouveau courtier">
+                                    <i class="fa-solid fa-plus text-[11px]"></i>
+                                </button>
+                                <button type="button" onclick="openBrokerManager()" class="w-9 h-9 rounded-lg bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700 hover:text-white transition flex items-center justify-center flex-shrink-0" title="Gérer les courtiers (renommer, supprimer)">
+                                    <i class="fa-solid fa-pen-to-square text-[11px]"></i>
+                                </button>
+                            </div>
                             <input type="hidden" id="add-broker" value="">
                         </div>
                     </div>

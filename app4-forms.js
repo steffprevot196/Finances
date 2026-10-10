@@ -1567,14 +1567,15 @@ function openRecapModal() {
 // =====================================================================
 
 const BROKERS_STORAGE_KEY = 'patriMonial_brokers';
-const BROKER_SEED_DEFAULT = [
-    'Boursorama', 'Bourse Direct', 'Fortuneo', 'Trade Republic',
-    'Interactive Brokers', 'Degiro', 'Saxo Banque', 'Binance',
-    'Coinbase', 'Kraken', 'Ledger', 'AuCoffre.com', 'Linxea',
-    'Yomoni', 'Nalo'
-];
 
-// Liste des courtiers mémorisés (uniquement ceux saisis par l'utilisateur)
+// ---------------------------------------------------------------------
+// LISTE DES COURTIERS — personnalisable par l'utilisateur
+// ---------------------------------------------------------------------
+// Les courtiers sont stockés dans localStorage et VIDES par défaut.
+// L'utilisateur les ajoute via le bouton « + », les gère via le bouton
+// « crayon ». Les courtiers attachés à des actifs existants sont toujours
+// visibles (pour ne pas perdre de données importées).
+
 function loadSavedBrokers() {
     try {
         const raw = localStorage.getItem(BROKERS_STORAGE_KEY);
@@ -1590,48 +1591,90 @@ function saveBrokers(list) {
     try { localStorage.setItem(BROKERS_STORAGE_KEY, JSON.stringify(list)); } catch (_) {}
 }
 
-// Renvoie la liste complète des suggestions : brokers mémorisés + ceux
-// présents dans les actifs existants + seed par défaut (dédupliqué).
+// Renvoie la liste complète : courtiers mémorisés + ceux utilisés par
+// des actifs existants. AUCUN courtier par défaut n'est injecté.
 function getAllBrokers() {
     const set = new Set();
     loadSavedBrokers().forEach(b => set.add(b));
-    (assets || []).forEach(a => { if (a.broker && a.broker.trim()) set.add(a.broker.trim()); });
-    BROKER_SEED_DEFAULT.forEach(b => set.add(b));
+    (assets || []).forEach(a => {
+        if (a.broker && a.broker.trim()) set.add(a.broker.trim());
+    });
     return [...set].sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
 }
 
-// Rafraîchit le <datalist> accroché au champ #add-broker
-function refreshBrokerDatalist() {
-    const datalist = document.getElementById('add-broker-datalist');
-    if (!datalist) return;
+// Remplit le <select> des courtiers. Préserve la valeur sélectionnée si
+// elle existe toujours dans la liste.
+function refreshBrokerSelect(selectedValue) {
+    const sel = document.getElementById('add-broker-select');
+    if (!sel) return;
+
+    const current = selectedValue !== undefined ? selectedValue : sel.value;
     const list = getAllBrokers();
-    datalist.innerHTML = list.map(b => `<option value="${escapeHTML(b)}"></option>`).join('');
+
+    sel.innerHTML = '<option value="">— Aucun —</option>' +
+        list.map(b => `<option value="${escapeHTML(b)}">${escapeHTML(b)}</option>`).join('');
+
+    if (current && list.includes(current)) {
+        sel.value = current;
+    } else {
+        sel.value = '';
+    }
+
+    const hidden = document.getElementById('add-broker');
+    if (hidden) hidden.value = sel.value;
 }
 
-// Mémorise un nouveau courtier s'il n'est pas déjà connu (appelé après une
-// création ou édition d'actif réussie).
+// Alias de compatibilité — appelé depuis app7-init.js et app4-forms.js
+function refreshBrokerDatalist() {
+    refreshBrokerSelect();
+}
+
+// Handler du <select> : synchronise le champ caché
+function onBrokerSelectChange() {
+    const sel = document.getElementById('add-broker-select');
+    const hidden = document.getElementById('add-broker');
+    if (sel && hidden) hidden.value = sel.value;
+}
+
+// Définit le courtier sélectionné (utilisé par openAddAssetModal et edit).
+// Si le nom n'existe pas dans la liste (actif importé avec un courtier
+// inconnu), il est ajouté à la volée pour ne pas le perdre.
+function setBrokerValue(brokerName) {
+    const trimmed = (brokerName || '').trim();
+
+    // Rafraîchit d'abord la liste (permet au nouveau nom d'apparaître)
+    refreshBrokerSelect();
+
+    const sel = document.getElementById('add-broker-select');
+    const hidden = document.getElementById('add-broker');
+
+    if (trimmed && sel && !Array.from(sel.options).some(o => o.value === trimmed)) {
+        const opt = document.createElement('option');
+        opt.value = trimmed;
+        opt.textContent = trimmed;
+        sel.appendChild(opt);
+    }
+    if (sel && trimmed) sel.value = trimmed;
+    if (hidden) hidden.value = trimmed;
+}
+
+// Mémorise un nouveau courtier (appelé après une création d'actif)
 function rememberBroker(name) {
     const trimmed = (name || '').trim();
     if (!trimmed) return;
     const saved = loadSavedBrokers();
-    const exists = saved.some(b => b.toLowerCase() === trimmed.toLowerCase());
-    if (exists) return;
+    if (saved.some(b => b.toLowerCase() === trimmed.toLowerCase())) return;
     saved.push(trimmed);
     saveBrokers(saved);
-    refreshBrokerDatalist();
+    refreshBrokerSelect();
 }
 
-// Supprime un nom de courtier du registre persistant.
-// Sécurité : ne supprime QUE si aucun autre actif n'utilise encore ce nom
-// (évite de retirer un courtier légitime quand on corrige une position).
+// Supprime un courtier du registre — uniquement s'il n'est plus utilisé
 function forgetBroker(name) {
     const trimmed = (name || '').trim();
     if (!trimmed) return;
     const lower = trimmed.toLowerCase();
 
-    // Vérifie qu'aucun autre actif (avec un id différent) n'utilise ce nom.
-    // On compare insensiblement à la casse pour éviter les doublons
-    // "Boursorama" / "boursorama".
     const stillUsed = (assets || []).some(a =>
         a.broker && a.broker.toLowerCase() === lower
     );
@@ -1641,20 +1684,187 @@ function forgetBroker(name) {
     const filtered = saved.filter(b => b.toLowerCase() !== lower);
     if (filtered.length !== saved.length) {
         saveBrokers(filtered);
-        refreshBrokerDatalist();
+        refreshBrokerSelect();
     }
 }
 
-// Rétrocompat : ancien handler du <select> (plus utilisé mais conservé
-// au cas où un handler inline subsisterait dans du HTML non mis à jour).
-function onBrokerSelectChange() { /* no-op */ }
+// ---------------------------------------------------------------------
+// AJOUT D'UN COURTIER (bouton +)
+// ---------------------------------------------------------------------
+function promptAddBroker() {
+    const name = prompt('Nom du nouveau courtier / plateforme :', '');
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim();
 
-// Rétrocompat : ancien setBrokerValue — adapté au nouveau champ texte.
-function setBrokerValue(brokerName) {
-    const input = document.getElementById('add-broker');
-    if (!input) return;
-    input.value = (brokerName || '').trim();
-    refreshBrokerDatalist();
+    const saved = loadSavedBrokers();
+    if (saved.some(b => b.toLowerCase() === trimmed.toLowerCase())) {
+        setBrokerValue(trimmed);
+        if (typeof toastInfo === 'function') {
+            toastInfo('Courtier déjà présent', `« ${trimmed} » a été sélectionné.`);
+        }
+        return;
+    }
+
+    saved.push(trimmed);
+    saveBrokers(saved);
+    refreshBrokerSelect();
+    setBrokerValue(trimmed);
+
+    if (typeof toastSuccess === 'function') {
+        toastSuccess('Courtier ajouté', `« ${trimmed} » est maintenant disponible.`);
+    }
+}
+
+// ---------------------------------------------------------------------
+// GESTIONNAIRE DE COURTIERS (modal)
+// ---------------------------------------------------------------------
+function openBrokerManager() {
+    let modal = document.getElementById('modal-broker-manager');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'modal-broker-manager';
+        modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60] hidden';
+        document.body.appendChild(modal);
+    }
+    renderBrokerManager(modal);
+    modal.classList.remove('hidden');
+}
+
+function renderBrokerManager(modal) {
+    const list = getAllBrokers();
+
+    // Compte les actifs utilisant chaque broker
+    const usageCount = {};
+    (assets || []).forEach(a => {
+        if (a.broker && a.broker.trim()) {
+            const k = a.broker.trim();
+            usageCount[k] = (usageCount[k] || 0) + 1;
+        }
+    });
+
+    const rowsHTML = list.length
+        ? list.map(b => {
+            const count = usageCount[b] || 0;
+            const safeArg = safeInlineArg(b);
+            const deleteDisabled = count > 0;
+            return `<div class="flex items-center gap-2 p-2.5 bg-gray-950 border border-gray-800 rounded-lg">
+                <span class="flex-1 min-w-0 font-mono text-[12px] text-white truncate" title="${escapeHTML(b)}">${escapeHTML(b)}</span>
+                ${count > 0 ? `<span class="text-[10px] text-gray-500 whitespace-nowrap flex-shrink-0">${count} actif(s)</span>` : ''}
+                <button type="button" onclick="renameBroker(${safeArg})" class="w-7 h-7 rounded-md bg-gray-800 text-gray-400 hover:bg-indigo-900/60 hover:text-indigo-300 flex items-center justify-center transition flex-shrink-0" title="Renommer">
+                    <i class="fa-solid fa-pen text-[10px]"></i>
+                </button>
+                <button type="button" onclick="deleteBroker(${safeArg})" class="w-7 h-7 rounded-md bg-gray-800 flex items-center justify-center transition flex-shrink-0 ${deleteDisabled ? 'text-gray-600 cursor-not-allowed' : 'text-gray-400 hover:bg-rose-900/60 hover:text-rose-300'}" title="${deleteDisabled ? 'Impossible : actif(s) lié(s)' : 'Supprimer'}" ${deleteDisabled ? 'disabled' : ''}>
+                    <i class="fa-solid fa-trash text-[10px]"></i>
+                </button>
+            </div>`;
+        }).join('')
+        : '<div class="text-center text-gray-500 italic text-xs py-6">Aucun courtier mémorisé.<br>Utilisez le bouton « + » pour en ajouter.</div>';
+
+    modal.innerHTML = `
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col max-h-[85vh]">
+            <div class="p-4 border-b border-gray-800 flex justify-between items-center bg-gray-950">
+                <div>
+                    <h3 class="font-bold text-white text-sm flex items-center gap-2">
+                        <i class="fa-solid fa-building-columns text-indigo-400"></i> Gérer les courtiers
+                    </h3>
+                    <p class="text-[11px] text-gray-500 mt-0.5">Renommer, ajouter ou supprimer les courtiers mémorisés.</p>
+                </div>
+                <button onclick="closeModal('modal-broker-manager')" class="text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="p-4 space-y-2 overflow-y-auto text-xs">
+                ${rowsHTML}
+            </div>
+            <div class="p-3 border-t border-gray-800 bg-gray-950 flex justify-between items-center gap-2">
+                <button type="button" onclick="promptAddBrokerFromManager()" class="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-plus text-[10px]"></i> Ajouter un courtier
+                </button>
+                <button type="button" onclick="closeModal('modal-broker-manager')" class="px-3 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 text-[11px] font-medium">Fermer</button>
+            </div>
+        </div>
+    `;
+}
+
+function promptAddBrokerFromManager() {
+    const name = prompt('Nom du nouveau courtier / plateforme :', '');
+    if (!name || !name.trim()) return;
+    const trimmed = name.trim();
+
+    const saved = loadSavedBrokers();
+    if (saved.some(b => b.toLowerCase() === trimmed.toLowerCase())) {
+        if (typeof toastInfo === 'function') toastInfo('Déjà présent', `« ${trimmed} » existe déjà.`);
+        return;
+    }
+    saved.push(trimmed);
+    saveBrokers(saved);
+    refreshBrokerSelect();
+
+    const modal = document.getElementById('modal-broker-manager');
+    if (modal) renderBrokerManager(modal);
+
+    if (typeof toastSuccess === 'function') {
+        toastSuccess('Courtier ajouté', `« ${trimmed} » est maintenant disponible.`);
+    }
+}
+
+function renameBroker(oldName) {
+    const newName = prompt(`Renommer « ${oldName} » en :`, oldName);
+    if (!newName || !newName.trim() || newName.trim() === oldName) return;
+    const trimmed = newName.trim();
+
+    const saved = loadSavedBrokers();
+    if (saved.some(b => b.toLowerCase() === trimmed.toLowerCase() && b !== oldName)) {
+        alert('Un courtier avec ce nom existe déjà.');
+        return;
+    }
+
+    // 1) Renomme dans la liste mémorisée
+    const idx = saved.findIndex(b => b === oldName);
+    if (idx > -1) {
+        saved[idx] = trimmed;
+        saveBrokers(saved);
+    }
+
+    // 2) Renomme dans tous les actifs qui utilisent ce courtier
+    let affected = 0;
+    (assets || []).forEach(a => {
+        if (a.broker === oldName) {
+            a.broker = trimmed;
+            affected++;
+        }
+    });
+    if (affected > 0 && typeof saveToStorage === 'function') {
+        saveToStorage();
+    }
+
+    refreshBrokerSelect();
+
+    const modal = document.getElementById('modal-broker-manager');
+    if (modal) renderBrokerManager(modal);
+
+    if (typeof toastSuccess === 'function') {
+        toastSuccess('Courtier renommé', affected > 0
+            ? `${affected} actif(s) mis à jour automatiquement.`
+            : 'Le nom a été mis à jour.');
+    }
+}
+
+function deleteBroker(name) {
+    const count = (assets || []).filter(a => a.broker === name).length;
+    if (count > 0) {
+        alert(`Impossible de supprimer « ${name} » : ${count} actif(s) l'utilise(nt) encore.\n\nChangez d'abord leur courtier via la fiche de chaque actif.`);
+        return;
+    }
+    if (!confirm(`Supprimer définitivement le courtier « ${name} » de la liste ?`)) return;
+
+    saveBrokers(loadSavedBrokers().filter(b => b !== name));
+    refreshBrokerSelect();
+
+    const modal = document.getElementById('modal-broker-manager');
+    if (modal) renderBrokerManager(modal);
+
+    if (typeof toastInfo === 'function') {
+        toastInfo('Courtier supprimé', name);
+    }
 }
 // =====================================================================
 // SIMULATEUR FISCALITÉ MÉTAUX (indépendant du registre)
