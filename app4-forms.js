@@ -972,6 +972,11 @@ function openAddCessionModal() {
     document.getElementById('cession-coupons').value = 0;
 
     toggleCessionFieldsByType();
+
+    // Masque l'aperçu fiscal tant qu'aucun prix n'est saisi
+    const previewEl = document.getElementById('cession-preview');
+    if (previewEl) previewEl.classList.add('hidden');
+
     document.getElementById('modal-add-cession').classList.remove('hidden');
 }
 
@@ -1031,6 +1036,9 @@ function prefillCessionFromAsset() {
 
     // Affiche le sélecteur nominatif si plusieurs pièces référencées disponibles
     renderCessionLotPicker(asset);
+
+    // Rafraîchit l'aperçu fiscal (les totaux viennent d'être pré-remplis)
+    if (typeof updateCessionPreview === 'function') updateCessionPreview();
 }
 
 // Affiche le sélecteur de pièce nominative si l'actif a plusieurs lots référencés
@@ -1195,6 +1203,9 @@ function onCessionQtyChange() {
 
     // Synchronise l'affichage des prix unitaires
     updateCessionUnitPrices();
+
+    // Rafraîchit l'aperçu fiscal
+    if (typeof updateCessionPreview === 'function') updateCessionPreview();
 }
 
 // Recalcule les prix unitaires AFFICHÉS à partir des valeurs RÉELLES des champs
@@ -1213,6 +1224,54 @@ function updateCessionUnitPrices() {
     if (achatUnitEl) {
         achatUnitEl.value = (qty > 0 && achatTotal > 0) ? parseFloat((achatTotal / qty).toFixed(6)) : '';
     }
+
+    // Rafraîchit l'aperçu fiscal à chaque variation de prix
+    if (typeof updateCessionPreview === 'function') updateCessionPreview();
+}
+
+// ---------------------------------------------------------------------
+// APERÇU FISCAL EN DIRECT — visible dans le modal de cession
+// ---------------------------------------------------------------------
+// Recalcule et affiche la cascade : vente → −PRU → −frais → PV nette.
+// Rend explicite la prise en compte des frais de cession (souvent
+// invisibles dans les totaux affichés).
+function updateCessionPreview() {
+    const preview = document.getElementById('cession-preview');
+    if (!preview) return;
+
+    const vente = parseFloat(document.getElementById('cession-prix-vente')?.value) || 0;
+    const achat = parseFloat(document.getElementById('cession-prix-achat')?.value) || 0;
+    const frais = parseFloat(document.getElementById('cession-frais')?.value) || 0;
+
+    // Cache l'aperçu si aucun prix n'est encore saisi
+    if (vente <= 0 && achat <= 0) {
+        preview.classList.add('hidden');
+        return;
+    }
+    preview.classList.remove('hidden');
+
+    const pvBrute = vente - achat;
+    const pvNette = pvBrute - frais;
+
+    const setText = (id, txt, cls) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.innerText = txt;
+        if (cls !== undefined) el.className = cls;
+    };
+
+    setText('cession-preview-vente', formatEUR(vente));
+    setText('cession-preview-achat', formatEUR(achat));
+
+    setText('cession-preview-pv-brute',
+        (pvBrute >= 0 ? '+' : '') + formatEUR(pvBrute),
+        pvBrute >= 0 ? 'text-emerald-400' : 'text-rose-400');
+
+    setText('cession-preview-frais', frais > 0 ? '−' + formatEUR(frais) : '0,00 €');
+
+    setText('cession-preview-pv-nette',
+        (pvNette >= 0 ? '+' : '') + formatEUR(pvNette),
+        'font-bold ' + (pvNette >= 0 ? 'text-emerald-400' : 'text-rose-400'));
 }
 
 function updateCessionTotalsFromUnit(type) {
