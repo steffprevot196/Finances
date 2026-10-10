@@ -856,16 +856,29 @@ async function fetchLivePrices() {
                 );
             }
 
-            // 1) Twelve Data (source principale, toutes places)
-            if (twelveDataApiKey) {
+            // Détecte si le symbole est US (pas de suffixe .XX) ou européen
+            // (.PA, .DE, .L, .MU, .AS, .MI, .SW…) — Twelve Data free tier
+            // ne couvre PAS les places européennes, donc on saute directement
+            // à Yahoo pour ces symboles.
+            const isEuropean = /\.[A-Z]{1,3}$/.test(symbol);
+
+            // 1) Yahoo en PREMIER pour les symboles européens (Twelve Data
+            //    ne les couvre pas → inutile de gaspiller un appel API).
+            if (isEuropean) {
+                try {
+                    const p = await fetchYahooQuote(symbol);
+                    if (p) { price = p; sources.push('Yahoo'); }
+                } catch (err) { sources.push(`Yahoo: ${err.message}`); }
+            }
+
+            // 2) Twelve Data (source principale pour les US, back-up pour l'Europe)
+            if (!price && twelveDataApiKey) {
                 try {
                     price = await fetchTwelveDataQuote(symbol);
                     if (price) sources.push('Twelve Data');
                     // 8 requêtes/min en gratuit → 7,5 s minimum entre appels.
                     // On saute la pause après le DERNIER actif (aucun appel après).
                     if (processed < stockAssets.length) {
-                        // Fait avancer la barre pendant l'attente, en interpolant
-                        // vers la prochaine position (feedback visuel).
                         if (showToast) {
                             updateProgressToast(
                                 `${processed} / ${stockAssets.length} · pause API (8 s)…`,
@@ -879,20 +892,12 @@ async function fetchLivePrices() {
                 }
             }
 
-            // 2) Finnhub (US uniquement, rapide)
+            // 3) Finnhub (US uniquement, rapide)
             if (!price && finnhubApiKey) {
                 try {
                     const p = await fetchFinnhubQuote(symbol);
                     if (p) { price = p; sources.push('Finnhub'); }
                 } catch (err) { sources.push(`Finnhub: ${err.message}`); }
-            }
-
-            // 3) Yahoo via proxy (fallback ultime, instable)
-            if (!price) {
-                try {
-                    const p = await fetchYahooQuote(symbol);
-                    if (p) { price = p; sources.push('Yahoo'); }
-                } catch (err) { sources.push(`Yahoo: ${err.message}`); }
             }
 
             if (price) {
