@@ -419,6 +419,18 @@ function handleAddAsset(e) {
         ? new Date(purchaseDate).toLocaleDateString('fr-FR')
         : new Date().toLocaleDateString('fr-FR');
 
+    // ── Détection d'une correction de courtier (mode édition) ──
+    // Si l'utilisateur a modifié le nom du courtier lors de l'édition
+    // d'un actif, on mémorise l'ancien nom pour le retirer du registre
+    // persistant après sauvegarde (voir plus bas).
+    let _oldBrokerToClean = null;
+    if (editId) {
+        const _editingAsset = assets.find(a => a.id === parseFloat(editId));
+        if (_editingAsset && _editingAsset.broker && _editingAsset.broker !== broker) {
+            _oldBrokerToClean = _editingAsset.broker;
+        }
+    }
+
     // À la création, la valeur de marché est initialisée au prix payé (0% de performance).
     // En édition, le champ "Valeur Actuelle" est réactivé et utilisé tel quel.
     const unitValue = editId
@@ -599,6 +611,19 @@ function handleAddAsset(e) {
     }
 
     saveToStorage();
+
+    // Mémorise le courtier saisi (pour qu'il apparaisse dans les
+    // suggestions des prochaines saisies).
+    if (typeof rememberBroker === 'function') rememberBroker(broker);
+
+    // Nettoyage automatique : si l'utilisateur vient de corriger une
+    // faute de frappe sur le nom du courtier (mode édition), l'ancien
+    // nom fautif est retiré du registre — à condition qu'aucun autre
+    // actif ne l'utilise encore (voir forgetBroker).
+    if (_oldBrokerToClean && typeof forgetBroker === 'function') {
+        forgetBroker(_oldBrokerToClean);
+    }
+
     closeModal('modal-add-asset');
     refreshAllUI();
     e.target.reset();
@@ -1415,53 +1440,104 @@ function openRecapModal() {
     `;
     document.getElementById('modal-recap').classList.remove('hidden');
 }
-// Gestion du sélecteur de courtier (avec création custom)
-const KNOWN_BROKERS = [
-    'Boursorama', 'Bourse Direct', 'Fortuneo', 'Trade Republic', 'Interactive Brokers',
-    'Degiro', 'Saxo Banque', 'Binance', 'Coinbase', 'Kraken', 'Ledger', 'AuCoffre.com',
-    'Linxea', 'Yomoni', 'Nalo'
+// =====================================================================
+// GESTION DYNAMIQUE DES COURTIERS (saisie libre + mémorisation)
+// ---------------------------------------------------------------------
+// L'utilisateur peut saisir librement un nom de courtier dans un champ
+// texte. Une fois enregistré avec un actif, le nom rejoint la liste des
+// suggestions (datalist) persistée dans localStorage. Le champ reste
+// modifiable à tout moment (correction de faute de frappe).
+// =====================================================================
+
+const BROKERS_STORAGE_KEY = 'patriMonial_brokers';
+const BROKER_SEED_DEFAULT = [
+    'Boursorama', 'Bourse Direct', 'Fortuneo', 'Trade Republic',
+    'Interactive Brokers', 'Degiro', 'Saxo Banque', 'Binance',
+    'Coinbase', 'Kraken', 'Ledger', 'AuCoffre.com', 'Linxea',
+    'Yomoni', 'Nalo'
 ];
 
-function onBrokerSelectChange() {
-    const sel = document.getElementById('add-broker-select');
-    const custom = document.getElementById('add-broker-custom');
-    const hidden = document.getElementById('add-broker');
-    if (sel.value === '__custom__') {
-        custom.classList.remove('hidden');
-        custom.focus();
-        custom.oninput = () => { hidden.value = custom.value.trim(); };
-        hidden.value = custom.value.trim();
-    } else {
-        custom.classList.add('hidden');
-        custom.value = '';
-        hidden.value = sel.value;
+// Liste des courtiers mémorisés (uniquement ceux saisis par l'utilisateur)
+function loadSavedBrokers() {
+    try {
+        const raw = localStorage.getItem(BROKERS_STORAGE_KEY);
+        if (raw) {
+            const list = JSON.parse(raw);
+            if (Array.isArray(list)) return list.filter(b => typeof b === 'string' && b.trim());
+        }
+    } catch (_) {}
+    return [];
+}
+
+function saveBrokers(list) {
+    try { localStorage.setItem(BROKERS_STORAGE_KEY, JSON.stringify(list)); } catch (_) {}
+}
+
+// Renvoie la liste complète des suggestions : brokers mémorisés + ceux
+// présents dans les actifs existants + seed par défaut (dédupliqué).
+function getAllBrokers() {
+    const set = new Set();
+    loadSavedBrokers().forEach(b => set.add(b));
+    (assets || []).forEach(a => { if (a.broker && a.broker.trim()) set.add(a.broker.trim()); });
+    BROKER_SEED_DEFAULT.forEach(b => set.add(b));
+    return [...set].sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+}
+
+// Rafraîchit le <datalist> accroché au champ #add-broker
+function refreshBrokerDatalist() {
+    const datalist = document.getElementById('add-broker-datalist');
+    if (!datalist) return;
+    const list = getAllBrokers();
+    datalist.innerHTML = list.map(b => `<option value="${escapeHTML(b)}"></option>`).join('');
+}
+
+// Mémorise un nouveau courtier s'il n'est pas déjà connu (appelé après une
+// création ou édition d'actif réussie).
+function rememberBroker(name) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    const saved = loadSavedBrokers();
+    const exists = saved.some(b => b.toLowerCase() === trimmed.toLowerCase());
+    if (exists) return;
+    saved.push(trimmed);
+    saveBrokers(saved);
+    refreshBrokerDatalist();
+}
+
+// Supprime un nom de courtier du registre persistant.
+// Sécurité : ne supprime QUE si aucun autre actif n'utilise encore ce nom
+// (évite de retirer un courtier légitime quand on corrige une position).
+function forgetBroker(name) {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+
+    // Vérifie qu'aucun autre actif (avec un id différent) n'utilise ce nom.
+    // On compare insensiblement à la casse pour éviter les doublons
+    // "Boursorama" / "boursorama".
+    const stillUsed = (assets || []).some(a =>
+        a.broker && a.broker.toLowerCase() === lower
+    );
+    if (stillUsed) return;
+
+    const saved = loadSavedBrokers();
+    const filtered = saved.filter(b => b.toLowerCase() !== lower);
+    if (filtered.length !== saved.length) {
+        saveBrokers(filtered);
+        refreshBrokerDatalist();
     }
 }
 
-// Pré-remplit le sélecteur de courtier à partir d'une valeur enregistrée
+// Rétrocompat : ancien handler du <select> (plus utilisé mais conservé
+// au cas où un handler inline subsisterait dans du HTML non mis à jour).
+function onBrokerSelectChange() { /* no-op */ }
+
+// Rétrocompat : ancien setBrokerValue — adapté au nouveau champ texte.
 function setBrokerValue(brokerName) {
-    const sel = document.getElementById('add-broker-select');
-    const custom = document.getElementById('add-broker-custom');
-    const hidden = document.getElementById('add-broker');
-    const v = (brokerName || '').trim();
-    if (!v) {
-        sel.value = '';
-        custom.classList.add('hidden');
-        custom.value = '';
-        hidden.value = '';
-        return;
-    }
-    if (KNOWN_BROKERS.includes(v) || v === '') {
-        sel.value = v;
-        custom.classList.add('hidden');
-        custom.value = '';
-    } else {
-        sel.value = '__custom__';
-        custom.classList.remove('hidden');
-        custom.value = v;
-        custom.oninput = () => { hidden.value = custom.value.trim(); };
-    }
-    hidden.value = v;
+    const input = document.getElementById('add-broker');
+    if (!input) return;
+    input.value = (brokerName || '').trim();
+    refreshBrokerDatalist();
 }
 // =====================================================================
 // SIMULATEUR FISCALITÉ MÉTAUX (indépendant du registre)

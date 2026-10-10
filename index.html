@@ -4386,27 +4386,8 @@
                         </div>
                         <div>
                             <label class="block text-gray-400 mb-1">Courtier / Plateforme</label>
-                            <select id="add-broker-select" onchange="onBrokerSelectChange()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500">
-                                <option value="">— Aucun —</option>
-                                <option value="Boursorama">Boursorama</option>
-                                <option value="Bourse Direct">Bourse Direct</option>
-                                <option value="Fortuneo">Fortuneo</option>
-                                <option value="Trade Republic">Trade Republic</option>
-                                <option value="Interactive Brokers">Interactive Brokers</option>
-                                <option value="Degiro">Degiro</option>
-                                <option value="Saxo Banque">Saxo Banque</option>
-                                <option value="Binance">Binance</option>
-                                <option value="Coinbase">Coinbase</option>
-                                <option value="Kraken">Kraken</option>
-                                <option value="Ledger">Ledger</option>
-                                <option value="AuCoffre.com">AuCoffre.com</option>
-                                <option value="Linxea">Linxea</option>
-                                <option value="Yomoni">Yomoni</option>
-                                <option value="Nalo">Nalo</option>
-                                <option value="__custom__">➕ Autre (saisir manuellement)</option>
-                            </select>
-                            <input type="text" id="add-broker-custom" placeholder="Nom du courtier / plateforme" autocomplete="off" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500 mt-1.5 hidden">
-                            <input type="hidden" id="add-broker" value="">
+                            <input type="text" id="add-broker" list="add-broker-datalist" placeholder="Saisir ou choisir un courtier…" autocomplete="off" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500">
+                            <datalist id="add-broker-datalist"></datalist>
                         </div>
                     </div>
 
