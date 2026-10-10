@@ -962,8 +962,8 @@ function openAddCessionModal() {
     if (hint) hint.innerText = '';
     const venteUnitEl = document.getElementById('cession-prix-vente-unit');
     const achatUnitEl = document.getElementById('cession-prix-achat-unit');
-    if (venteUnitEl) venteUnitEl.innerText = '— €/unité';
-    if (achatUnitEl) achatUnitEl.innerText = '— €/unité';
+    if (venteUnitEl) venteUnitEl.value = '';
+    if (achatUnitEl) achatUnitEl.value = '';
     document.getElementById('cession-frais').value = 0;
     document.getElementById('cession-avant-2018').checked = false;
     document.getElementById('cession-enveloppe').value = 'CTO';
@@ -1009,8 +1009,12 @@ function prefillCessionFromAsset() {
     // PRU moyen pondéré (méthode fiscale française) recalculé depuis les lots
     const pru = computePRUFromLots(asset);
     const prixAchatUnitaire = pru > 0 ? pru : (asset.qty > 0 ? (asset.invested / asset.qty) : 0);
+    const prixVenteUnitaire = asset.qty > 0 ? (asset.value / asset.qty) : 0;
+    
     document.getElementById('cession-prix-achat').value = (prixAchatUnitaire * asset.qty).toFixed(2);
     document.getElementById('cession-prix-vente').value = (asset.value || 0).toFixed(2);
+    document.getElementById('cession-prix-achat-unit').value = prixAchatUnitaire.toFixed(6);
+    document.getElementById('cession-prix-vente-unit').value = prixVenteUnitaire.toFixed(6);
     document.getElementById('cession-enveloppe').value = SECURITY_ENVELOPES.includes(asset.envelope)
         ? asset.envelope
         : 'CTO';
@@ -1078,7 +1082,13 @@ function renderCessionLotPicker(asset) {
 
     // Pré-remplit date achat et prix achat depuis ce lot
     document.getElementById('cession-date-achat').value = firstLot.date || '';
-    document.getElementById('cession-prix-achat').value = ((firstLot.price || 0) * 1).toFixed(2);
+    const lotUnitCost = (firstLot.price || 0) + ((firstLot.frais || 0) / (firstLot.qty || 1));
+    document.getElementById('cession-prix-achat').value = lotUnitCost.toFixed(2);
+
+    // Réinitialise les champs PU pour éviter une valeur résiduelle d'un autre actif
+    document.getElementById('cession-prix-achat-unit').value = lotUnitCost.toFixed(6);
+    // Le PU de vente sera calculé par onCessionQtyChange() à partir de la valeur marché
+    document.getElementById('cession-prix-vente-unit').value = '';
 
     // Hint quantité
     const hint = document.getElementById('cession-qty-hint');
@@ -1102,8 +1112,12 @@ function onCessionLotChange() {
     if (!lot) return;
 
     // Recalcule prix d'achat (total = unitaire × 1)
+    const lotUnitCost = (lot.price || 0) + ((lot.frais || 0) / (lot.qty || 1));
     document.getElementById('cession-date-achat').value = lot.date || '';
-    document.getElementById('cession-prix-achat').value = ((lot.price || 0) + ((lot.frais || 0) / (lot.qty || 1))).toFixed(2);
+    document.getElementById('cession-prix-achat').value = lotUnitCost.toFixed(2);
+    // Force le PU d'achat pour qu'il soit cohérent avec ce lot spécifique
+    document.getElementById('cession-prix-achat-unit').value = lotUnitCost.toFixed(6);
+
     updateCessionUnitPrices();
 }
 
@@ -1149,11 +1163,25 @@ function onCessionQtyChange() {
         pru = computePRUFromLots(asset) || (asset.qty > 0 ? asset.invested / asset.qty : 0);
     }
 
-    // Mise à jour des prix totaux
-    document.getElementById('cession-prix-achat').value = (pru * qty).toFixed(2);
-    document.getElementById('cession-prix-vente').value = (unitValue * qty).toFixed(2);
+    // Récupère les prix unitaires saisis ou calculés
+    const venteUnitInput = document.getElementById('cession-prix-vente-unit').value;
+    const achatUnitInput = document.getElementById('cession-prix-achat-unit').value;
 
-        // Hint
+    let venteUnit = unitValue;
+    let achatUnit = pru;
+
+    if (venteUnitInput && !isNaN(parseFloat(venteUnitInput))) {
+        venteUnit = parseFloat(venteUnitInput);
+    }
+    if (achatUnitInput && !isNaN(parseFloat(achatUnitInput))) {
+        achatUnit = parseFloat(achatUnitInput);
+    }
+
+    // Mise à jour des prix totaux en fonction des prix unitaires
+    document.getElementById('cession-prix-achat').value = (achatUnit * qty).toFixed(2);
+    document.getElementById('cession-prix-vente').value = (venteUnit * qty).toFixed(2);
+
+    // Hint
     const hint = document.getElementById('cession-qty-hint');
     if (hint) {
         if (qty > maxQty) {
@@ -1165,7 +1193,7 @@ function onCessionQtyChange() {
         }
     }
 
-    // Affiche aussi les prix unitaires
+    // Synchronise l'affichage des prix unitaires
     updateCessionUnitPrices();
 }
 
@@ -1180,14 +1208,31 @@ function updateCessionUnitPrices() {
     const achatUnitEl = document.getElementById('cession-prix-achat-unit');
 
     if (venteUnitEl) {
-        venteUnitEl.innerText = (qty > 0 && venteTotale > 0)
-            ? `${formatEUR(venteTotale / qty)} / unité`
-            : '— €/unité';
+        venteUnitEl.value = (qty > 0 && venteTotale > 0) ? parseFloat((venteTotale / qty).toFixed(6)) : '';
     }
     if (achatUnitEl) {
-        achatUnitEl.innerText = (qty > 0 && achatTotal > 0)
-            ? `${formatEUR(achatTotal / qty)} / unité`
-            : '— €/unité';
+        achatUnitEl.value = (qty > 0 && achatTotal > 0) ? parseFloat((achatTotal / qty).toFixed(6)) : '';
+    }
+}
+
+function updateCessionTotalsFromUnit(type) {
+    const qty = parseFloat(document.getElementById('cession-qty').value) || 0;
+    if (qty <= 0) return;
+
+    if (type === 'vente') {
+        const unitPriceInput = document.getElementById('cession-prix-vente-unit');
+        const unitPrice = parseFloat(unitPriceInput.value);
+        const totalEl = document.getElementById('cession-prix-vente');
+        if (Number.isFinite(unitPrice) && unitPrice > 0) {
+            totalEl.value = (qty * unitPrice).toFixed(2);
+        }
+    } else if (type === 'achat') {
+        const unitPriceInput = document.getElementById('cession-prix-achat-unit');
+        const unitPrice = parseFloat(unitPriceInput.value);
+        const totalEl = document.getElementById('cession-prix-achat');
+        if (Number.isFinite(unitPrice) && unitPrice > 0) {
+            totalEl.value = (qty * unitPrice).toFixed(2);
+        }
     }
 }
 
@@ -1383,6 +1428,13 @@ function editCession(id) {
     document.getElementById('cession-date-achat').value = c.dateAchat || '';
     document.getElementById('cession-prix-vente').value = c.prixVente;
     document.getElementById('cession-prix-achat').value = c.prixAchat;
+    // Affiche aussi les prix unitaires reconstitués (prix total / quantité)
+    // La quantité n'est pas stockée dans la cession — on utilise 1 comme valeur par défaut.
+    // L'utilisateur peut ajuster la quantité pour recalculer.
+    const qtyEl = document.getElementById('cession-qty');
+    const qtyForUnit = parseFloat(qtyEl?.value) || 1;
+    document.getElementById('cession-prix-vente-unit').value = (c.prixVente / qtyForUnit).toFixed(6);
+    document.getElementById('cession-prix-achat-unit').value = (c.prixAchat / qtyForUnit).toFixed(6);
     document.getElementById('cession-frais').value = c.frais || 0;
     document.getElementById('cession-avant-2018').checked = !!c.avant2018;
     document.getElementById('cession-enveloppe').value = c.envelope || 'CTO';
