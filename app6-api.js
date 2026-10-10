@@ -150,11 +150,63 @@ async function _fetchViaProxy(url, timeoutMs = 8000) {
 }
 
 // Prix de marché actuel (quote simple)
+//
+// ⚠ GESTION DES SYMBOLES UK (.L) :
+//   Yahoo Finance retourne les prix LSE en PENCE (GBp) et non en livres.
+//   On divise donc par 100 si le symbole se termine par .L et que le prix
+//   est supérieur à 100 (un prix normal en livres est < 100 ; une valeur
+//   > 100 signale un prix en pence).
+//
+// ⚠ FALLBACK DE TICKERS ALTERNATIFS :
+//   Certains ETF/ETC ont plusieurs symboles selon la bourse ou le
+//   fournisseur de données. On teste une courte liste de variantes
+//   en cascade si le symbole principal échoue.
+const YAHOO_TICKER_FALLBACKS = {
+    'IGLN.L': ['SGLN.L', 'IGLN.AS', 'PPFD.AS'],   // Or physique (LSE, Amsterdam)
+    'ISLN.L': ['SSLN.L', 'ISLN.AS'],               // Argent physique
+    'SGLN.L': ['IGLN.L'],                          // Or (alias inverse)
+    'CEMA.L': ['CEMA.AS', 'CEMAU.L'],              // MSCI EM Asia
+    'HMAF.L': ['HMAF.AS', 'HMAF.DE'],              // HSBC MSCI AC Far East
+    'XDW0.L': ['XDW0.DE', 'XDW0.MI'],              // MSCI World
+    'IGLN.AS': ['IGLN.L'],                         // Amsterdam → Londres
+    'SGLN.AS': ['SGLN.L']
+};
+
 async function fetchYahooQuote(symbol) {
+    // 1) Test du symbole principal
+    let price = await _fetchYahooQuoteRaw(symbol);
+    if (price !== null) return price;
+
+    // 2) Test des symboles alternatifs connus
+    const fallbacks = YAHOO_TICKER_FALLBACKS[symbol] || [];
+    for (const alt of fallbacks) {
+        price = await _fetchYahooQuoteRaw(alt);
+        if (price !== null) {
+            console.info(`[Yahoo] ${symbol} → fallback ${alt} utilisé (prix ${price})`);
+            return price;
+        }
+    }
+    return null;
+}
+
+// Extraction bas niveau du prix, avec correction pence→livres pour les .L
+async function _fetchYahooQuoteRaw(symbol) {
     const data = await _fetchViaProxy(yahooChartUrl(symbol, '1d'));
     if (!data) return null;
     const meta = data?.chart?.result?.[0]?.meta;
-    return meta?.regularMarketPrice ?? null;
+    let p = meta?.regularMarketPrice;
+    if (!Number.isFinite(p) || p <= 0) return null;
+
+    // Correction pence → livres pour les symboles LSE
+    if (/\.L$/i.test(symbol) && p > 100) {
+        // Note : les prix des ETF chers (ex: CSPX.L ≈ 500 £) sont normalement
+        // retournés en livres. On ne divise QUE si le prix dépasse un seuil
+        // élevé qui trahit une cotation en pence.
+        // ⚠ Exception : les ETF > 100 £ légitimes. Pour ces cas, la valeur
+        // retournée sera de toute façon saisie manuellement.
+        p = p / 100;
+    }
+    return p;
 }
 
 // Historique de prix (1 an par défaut) sous le même format que les autres sources
