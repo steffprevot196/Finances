@@ -2225,12 +2225,36 @@ function createSnapshot(label) {
     catch (err) { console.warn('Sauvegarde locale impossible (quota ?) :', err); }
 }
 
-function currentDataSnapshot() {
-    return {
+// Snapshot des données applicatives.
+//
+// `includeApiKeys` (défaut : false) :
+//   • false → export JSON, sauvegardes locales : les clés API sont EXCLUES
+//             (fichiers non chiffrés, lisibles par toute extension navigateur)
+//   • true  → push Google Drive : les clés API sont INCLUSES car l'enveloppe
+//             Drive est chiffrée AES-GCM 256 avant upload, donc illisible
+//             pour Google et pour tout tiers sans la phrase secrète.
+//
+// ⚠ Ne JAMAIS passer `true` à l'export JSON ou aux sauvegardes locales.
+function currentDataSnapshot(includeApiKeys = false) {
+    const snap = {
         assets, cessions, arbitrages, cadranNames,
         dataVersion: DATA_VERSION,
         savedAt: new Date().toISOString()
     };
+
+    if (includeApiKeys) {
+        // Clés API actuellement en mémoire volatile (session).
+        // Les clés brokers vivent dans _brokerKeysMemory (app27).
+        snap.apiKeys = {
+            finnhub:     typeof finnhubApiKey     === 'string' ? finnhubApiKey     : '',
+            twelveData:  typeof twelveDataApiKey  === 'string' ? twelveDataApiKey  : '',
+            brokerKeys:  (typeof _brokerKeysMemory === 'object' && _brokerKeysMemory)
+                          ? JSON.parse(JSON.stringify(_brokerKeysMemory))
+                          : {}
+        };
+    }
+
+    return snap;
 }
 
 function checkDailyAutoBackup() {

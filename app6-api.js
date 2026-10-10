@@ -1223,7 +1223,9 @@ async function pushToDrive() {
     if (!passphrase && hasKey) passphrase = null;
 
     try {
-        const envelope = await encryptPayload(currentDataSnapshot(), passphrase);
+        // ⚠ includeApiKeys=true : l'enveloppe Drive est chiffrée AES-GCM,
+// donc les clés API sont protégées en transit et au repos.
+const envelope = await encryptPayload(currentDataSnapshot(true), passphrase);
         const metadata = { name: 'patrimonial-backup-' + Date.now() + '.json', parents: ['appDataFolder'] };
         const form = new FormData();
         form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
@@ -1467,9 +1469,41 @@ async function pullFromDrive(fileId) {
         }
         assets.forEach(normalizeAsset);
         cessions.forEach(normalizeCession);
+
+        // Restauration des clés API si présentes dans l'enveloppe chiffrée.
+        // ⚠ Session-only : on les remet en mémoire volatile, JAMAIS en
+        //   localStorage (cohérent avec la politique de sécurité M3).
+        if (payload.apiKeys && typeof payload.apiKeys === 'object') {
+            try {
+                if (typeof payload.apiKeys.finnhub === 'string') {
+                    finnhubApiKey = payload.apiKeys.finnhub;
+                }
+                if (typeof payload.apiKeys.twelveData === 'string') {
+                    twelveDataApiKey = payload.apiKeys.twelveData;
+                }
+                if (payload.apiKeys.brokerKeys && typeof payload.apiKeys.brokerKeys === 'object'
+                    && typeof _brokerKeysMemory === 'object') {
+                    Object.keys(payload.apiKeys.brokerKeys).forEach(broker => {
+                        const entry = payload.apiKeys.brokerKeys[broker];
+                        if (entry && entry.key && entry.secret) {
+                            _brokerKeysMemory[broker] = entry;
+                        }
+                    });
+                }
+                console.info('[Drive] Clés API restaurées en mémoire de session.');
+            } catch (err) {
+                console.warn('[Drive] Restauration des clés API échouée :', err);
+            }
+        }
+
         saveToStorage(); saveCessions(); saveArbitrages();
         refreshAllUI();
-        alert('Données restaurées depuis Google Drive.');
+
+        // Rafraîchit l'UI des champs de clés dans le modal Synchronisation
+        if (typeof initDriveSyncUI === 'function') initDriveSyncUI();
+
+        alert('Données restaurées depuis Google Drive.'
+            + (payload.apiKeys ? '\n\nLes clés API ont été restaurées en mémoire de session.' : ''));
     } catch (err) {
         alert('Échec de la restauration (mauvaise phrase secrète ou fichier corrompu ?) : ' + err.message);
     }
@@ -1644,7 +1678,7 @@ async function shouldAutoBackupToDrive() {
 // uniquement (pas d'alerte).
 async function performSilentDriveBackup() {
     try {
-        const envelope = await encryptPayload(currentDataSnapshot(), null);
+        const envelope = await encryptPayload(currentDataSnapshot(true), null);
         const metadata = {
             name: 'patrimonial-backup-auto-' + Date.now() + '.json',
             parents: ['appDataFolder']
