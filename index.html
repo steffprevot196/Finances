@@ -1,23 +1,340 @@
-                    <div class="grid grid-cols-3 gap-3">
-                        <div>
-                            <label class="block text-gray-400 mb-1">Quantité vendue</label>
-                            <input type="number" step="any" id="cession-qty" placeholder="1" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500 font-mono">
-                            <p id="cession-qty-hint" class="text-[10px] text-gray-500 mt-1"></p>
-                        </div>
-                        <div>
-                            <label class="block text-gray-400 mb-1">Prix de Vente Total (€) *</label>
-                            <input type="number" step="any" id="cession-prix-vente" oninput="updateCessionUnitPrices()" required placeholder="14470.00" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500 font-mono">
-                            <div class="flex items-center gap-1 mt-1">
-                                <input type="number" step="any" id="cession-prix-vente-unit" oninput="updateCessionTotalsFromUnit('vente')" class="w-24 bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-[10px] text-right text-gray-400 focus:outline-none focus:border-indigo-500 font-mono" placeholder="—">
-                                <span class="text-[10px] text-gray-500">€/unité</span>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-gray-400 mb-1">Prix d'Achat Total (PRU) *</label>
-                            <input type="number" step="any" id="cession-prix-achat" oninput="updateCessionUnitPrices()" required placeholder="9200.00" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500 font-mono">
-                            <div class="flex items-center gap-1 mt-1">
-                                <input type="number" step="any" id="cession-prix-achat-unit" oninput="updateCessionTotalsFromUnit('achat')" class="w-24 bg-gray-900 border border-gray-800 rounded px-1.5 py-0.5 text-[10px] text-right text-gray-400 focus:outline-none focus:border-indigo-500 font-mono" placeholder="—">
-                                <span class="text-[10px] text-gray-500">€/unité</span>
-                            </div>
-                        </div>
+<!DOCTYPE html>
+<html lang="fr" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!--
+        =====================================================================
+        Content Security Policy
+        =====================================================================
+        ⚠ IMPORTANT — Livraison par <meta> : limitations connues
+
+        1) `frame-ancestors` est IGNORÉ par les navigateurs quand la CSP est
+           livrée via <meta http-equiv>. La protection anti-clickjacking
+           RÉELLE doit être livrée via en-tête HTTP :
+               Content-Security-Policy: frame-ancestors 'none'
+           La directive présente ci-dessous est donc purement documentaire.
+           → À RETIRER quand un en-tête HTTP sera en place (sinon confusion).
+
+        2) `report-uri` / `report-to` sont également ignorés en mode <meta>.
+
+        Durcissements appliqués (audit 2026) :
+          • B1 — Retrait du wildcard `https://*.gstatic.com` (surface élargie)
+                 → remplacé par `https://accounts.gstatic.com`.
+          • B2 — Retrait de `https://cdn.jsdelivr.net` de `connect-src`.
+          • M2 — Retrait de `'unsafe-inline'` de `script-src`.
+                 ⚠ PRÉ-REQUIS : le délégateur de handlers inline
+                 (app28-csp-audit.js) DOIT être actif au boot (voir
+                 app7-init.js → enableCspFallbackDelegator()). Sans lui,
+                 tous les onclick=/onchange=/oninput= du HTML sont
+                 silencieusement bloqués par le navigateur.
+                 Contrôler la couverture avec : reportCspReadiness()
+        =====================================================================
+    -->
+    <meta http-equiv="Content-Security-Policy"
+          content="default-src 'self';
+                   script-src 'self'
+                              https://cdn.tailwindcss.com
+                              https://cdn.jsdelivr.net
+                              https://cdnjs.cloudflare.com
+                              https://accounts.google.com
+                              https://accounts.gstatic.com;
+                   connect-src 'self'
+                               https://api.coingecko.com
+                               https://api.frankfurter.dev
+                               https://finnhub.io
+                               https://xaus.com
+                               https://www.googleapis.com
+                               https://accounts.google.com
+                               https://oauth2.googleapis.com
+                               https://api.twelvedata.com;
+                   img-src 'self' data:;
+                   style-src 'self' 'unsafe-inline'
+                             https://fonts.googleapis.com
+                             https://cdnjs.cloudflare.com;
+                   font-src 'self' https://fonts.gstatic.com
+                            https://cdnjs.cloudflare.com;
+                   base-uri 'self';
+                   worker-src 'self';">
+
+        <title>PatriMonial - Gestion & Suivi de Patrimoine</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📊</text></svg>">
+
+    <!-- === PWA — Chantier #12 === -->
+    <!-- Manifest : métadonnées d'installation (nom, icônes, raccourcis) -->
+    <link rel="manifest" href="manifest.json">
+
+    <!-- Couleur de la barre système (Android Chrome, Edge, Brave) : accordée au fond sombre de l'app -->
+    <meta name="theme-color" content="#0a0e17">
+
+    <!-- Meta iOS Safari : installation sur l'écran d'accueil -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="PatriMonial">
+    <link rel="apple-touch-icon" href="icon.svg">
+
+    <!-- Meta Android / Chrome : installation via le menu "Ajouter à l'écran d'accueil" -->
+    <meta name="mobile-web-app-capable" content="yes">
+
+    <!-- Fallback universel : titre court utilisé par les launchers d'apps -->
+    <meta name="application-name" content="PatriMonial">
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkBg: '#0b0f19',
+                        cardBg: '#111827',
+                        cardBorder: '#1f2937',
+                        accentGreen: '#10b981',
+                        accentBlue: '#3b82f6',
+                        accentPurple: '#8b5cf6',
+                        accentAmber: '#f59e0b',
+                        accentRed: '#ef4444'
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome icons (version épinglée, SRI désactivé) -->
+    <link rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+          crossorigin="anonymous"
+          referrerpolicy="no-referrer">
+    <!-- Chart.js (version épinglée, SRI désactivé) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"></script>
+    <!-- SheetJS (version épinglée, SRI désactivé) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"
+            crossorigin="anonymous"
+            referrerpolicy="no-referrer"></script>
+
+
+    <link rel="stylesheet" href="style.css">
+
+</head>
+<body class="p-4 md:p-6 min-h-screen flex flex-col">
+
+    <!-- INPUTS FICHIERS MASQUÉS -->
+    <input type="file" id="input-import-json" accept=".json" class="hidden" onchange="handleImportJSON(event)">
+    <input type="file" id="input-import-csv" accept=".csv,.xlsx,.xls" class="hidden" onchange="handleImportCSVFile(event)">
+
+    <!-- HEADER GLOBAL -->
+    <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-gray-800 pb-4">
+        <div class="flex items-center gap-3">
+            <button type="button" onclick="openSidebarMobile()" class="lg:hidden w-9 h-9 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 hover:text-white transition flex items-center justify-center flex-shrink-0" title="Ouvrir le menu" aria-label="Ouvrir le menu">
+                <i class="fa-solid fa-bars"></i>
+            </button>
+            <div class="w-11 h-11 rounded-xl bg-gradient-to-tr from-emerald-600 to-teal-500 flex items-center justify-center text-white text-xl font-bold shadow-lg shadow-emerald-900/30">
+                <i class="fa-solid fa-chart-pie"></i>
+            </div>
+            <div>
+                <h1 class="text-xl md:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+                    PatriMonial <span class="text-xs px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-400 border border-emerald-700/50 font-medium">Suivi 360°</span>
+                </h1>
+                <p class="text-xs text-gray-400">Gestion de Portefeuille, 4 Cadrans de Gave & Fiscalité des Métaux</p>
+            </div>
+        </div>
+
+        <div class="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
+
+            <!-- CLOCHE ALERTES -->
+            <div class="relative flex-shrink-0">
+                <button onclick="openAlertsModal()" id="alerts-bell-btn" class="w-8 h-8 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 hover:text-white transition flex items-center justify-center relative" title="Alertes personnalisées">
+                    <i class="fa-solid fa-bell text-[13px]"></i>
+                    <span id="alerts-badge" class="hidden absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center border border-gray-900">0</span>
+                </button>
+            </div>
+
+            <!-- TOGGLE THÈME : sombre → clair → auto (Chantier 2.2) -->
+            <button onclick="toggleLightMode()" id="theme-toggle-btn" class="w-8 h-8 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 hover:text-white transition flex items-center justify-center flex-shrink-0" title="Thème : Sombre · Cliquez pour passer en Clair">
+                <i id="theme-toggle-icon" class="fa-solid fa-moon"></i>
+            </button>
+
+            <!-- TOGGLE DENSITÉ : confort ⇄ compact (Chantier 2.6) -->
+            <button onclick="toggleDensityMode()" id="density-toggle-btn" class="w-8 h-8 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 hover:text-white transition flex items-center justify-center flex-shrink-0" title="Densité : Confort · Cliquez pour passer en Compacte">
+                <i id="density-toggle-icon" class="fa-solid fa-expand"></i>
+            </button>
+
+            <!-- TOGGLE PAPER TRADING + SÉLECTEUR DE SCÉNARIO -->
+            <div class="relative flex-shrink-0">
+                <button onclick="togglePaperMode()" id="paper-toggle-btn" class="px-3 py-1.5 rounded-lg bg-gray-900 border border-gray-700 text-xs text-gray-400 hover:text-white transition flex items-center gap-1.5 max-w-[240px]" title="Simuler des positions fictives en parallèle du portefeuille réel">
+                    <i id="paper-toggle-icon" class="fa-solid fa-flask text-[11px]"></i>
+                    <span id="paper-toggle-label" class="hidden sm:inline max-w-[140px] truncate">Paper</span>
+                    <span id="paper-count-badge" class="hidden px-1.5 py-0.5 rounded bg-purple-950 border border-purple-800/60 text-purple-300 text-[9px] font-mono">0</span>
+                    <i class="fa-solid fa-chevron-down text-[8px] opacity-60 hover:opacity-100" onclick="event.stopPropagation(); togglePaperScenarioMenu(event)"></i>
+                </button>
+                <div id="paper-scenario-menu" class="hidden absolute right-0 top-full mt-2 w-72 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl overflow-hidden z-[60]">
+                    <div class="p-2.5 border-b border-gray-800 bg-gray-950">
+                        <div class="text-[10px] text-gray-500 uppercase tracking-wider font-bold">Scénarios de test</div>
+                        <div class="text-[10px] text-gray-600 mt-0.5">Chaque scénario a sa couleur et son jeu de positions fictives.</div>
                     </div>
+                    <div id="paper-scenario-list" class="max-h-64 overflow-y-auto"></div>
+                    <div class="p-2 border-t border-gray-800">
+                        <button onclick="createPaperScenarioUI()" class="w-full px-3 py-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-medium transition flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-plus"></i> Nouveau scénario
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SÉLECTEUR DE PORTEFEUILLE -->
+            <div class="relative">
+                <button onclick="togglePortfolioMenu(event)" class="px-3 py-1.5 rounded-lg bg-indigo-950/60 text-indigo-200 border border-indigo-700/50 hover:bg-indigo-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Changer de portefeuille (Perso, Pro, Enfants…)">
+                    <i class="fa-solid fa-folder-tree"></i>
+                    <span id="current-portfolio-label" class="max-w-[130px] truncate">Portefeuille</span>
+                    <i class="fa-solid fa-chevron-down text-[10px] opacity-70"></i>
+                </button>
+                <div id="portfolio-menu" class="hidden absolute right-0 top-full mt-2 w-80 bg-gray-900 border border-gray-800 rounded-xl shadow-2xl overflow-hidden z-[60]">
+                    <div class="p-3 border-b border-gray-800 bg-gray-950">
+                        <div class="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Patrimoine global (tous portefeuilles)</div>
+                        <div id="portfolio-global-total" class="text-lg font-bold font-mono text-white">0,00 €</div>
+                    </div>
+                    <div id="portfolio-list" class="max-h-64 overflow-y-auto"></div>
+                    <div class="p-2 border-t border-gray-800 flex gap-2">
+                        <button onclick="addPortfolio()" class="flex-1 px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium transition flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-plus"></i> Nouveau portefeuille
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <button onclick="fetchLivePrices()" id="btn-live-prices" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-300 border border-emerald-700/50 hover:bg-emerald-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Actualiser crypto/devises automatiquement, puis mise à jour manuelle groupée pour le reste du portefeuille">
+                <i class="fa-solid fa-arrows-rotate" id="icon-refresh-prices"></i> Actualiser les cours
+            </button>
+            <button onclick="refreshRealPriceHistory()" id="btn-refresh-history" class="px-3 py-1.5 rounded-lg bg-teal-950/60 text-teal-300 border border-teal-700/50 hover:bg-teal-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Télécharger l'historique réel des cours (1 an) pour les cryptos et devises reconnues">
+                <i class="fa-solid fa-chart-line" id="icon-refresh-history"></i> Historique de prix
+            </button>
+            <button onclick="openDriveSyncModal()" class="px-3 py-1.5 rounded-lg bg-blue-950/60 text-blue-300 border border-blue-700/50 hover:bg-blue-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Sauvegardes locales et synchronisation Google Drive chiffrée">
+                <i class="fa-solid fa-cloud-arrow-up"></i> Synchronisation
+            </button>
+            <button onclick="exportMonthlyReportPDF()" class="px-3 py-1.5 rounded-lg bg-indigo-950/60 text-indigo-300 border border-indigo-700/50 hover:bg-indigo-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Générer un rapport PDF A4 complet (synthèse, allocation, portefeuille détaillé, fiscalité)">
+                <i class="fa-solid fa-file-pdf"></i> Rapport mensuel
+            </button>
+            <button onclick="clearAllData()" class="px-3 py-1.5 rounded-lg bg-rose-950/40 text-rose-300 border border-rose-800/50 hover:bg-rose-900/60 text-xs font-medium transition flex items-center gap-1.5" title="Effacer tous les actifs pour recommencer à zéro">
+                <i class="fa-solid fa-trash-can"></i> Vider tout
+            </button>
+            <button onclick="resetData()" class="px-3 py-1.5 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 text-xs font-medium transition flex items-center gap-1.5" title="Charger les données d'exemple">
+                <i class="fa-solid fa-rotate-left"></i> Démo
+            </button>
+            <button onclick="exportData()" class="px-3 py-1.5 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 text-xs font-medium transition flex items-center gap-1.5" title="Télécharger la sauvegarde JSON">
+                <i class="fa-solid fa-download"></i> Exporter
+            </button>
+            <button onclick="exportToExcel()" id="btn-export-excel" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-300 border border-emerald-700/50 hover:bg-emerald-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Exporter en Excel (.xlsx) — 5 feuilles : synthèse, actifs, lots, cessions, arbitrages">
+                <i class="fa-solid fa-file-excel"></i> Excel
+            </button>
+            <button onclick="document.getElementById('input-import-json').click()" class="px-3 py-1.5 rounded-lg bg-gray-800 text-gray-300 border border-gray-700 hover:bg-gray-700 text-xs font-medium transition flex items-center gap-1.5" title="Restaurer un fichier JSON PatriMonial">
+                <i class="fa-solid fa-file-import"></i> Importer
+            </button>
+            <button onclick="openCsvImportModal()" class="px-3 py-1.5 rounded-lg bg-teal-950/60 text-teal-300 border border-teal-700/50 hover:bg-teal-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Importer un relevé CSV / Excel (AuCoffre, Trade Republic, Boursorama, Scalable, Revolut)">
+                <i class="fa-solid fa-file-csv"></i> Import CSV
+            </button>
+            <button onclick="openSellAssetModal()" class="px-3.5 py-1.5 rounded-lg bg-rose-600 text-white font-medium hover:bg-rose-500 text-xs shadow-lg shadow-rose-900/40 transition flex items-center gap-1.5" title="Enregistrer la vente d'un actif que vous possédiez à une date donnée">
+                <i class="fa-solid fa-hand-holding-dollar"></i> Vendre un actif
+            </button>
+            <button onclick="openAddAssetModal()" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 text-white font-medium hover:bg-emerald-500 text-xs shadow-lg shadow-emerald-900/40 transition flex items-center gap-1.5">
+                <i class="fa-solid fa-plus"></i> Ajouter un actif
+            </button>
+        </div>
+    </header>
+
+    <!-- ZONE DE BANNIÈRES D'ALERTES (remplie dynamiquement par app9-alerts.js) -->
+    <div id="alerts-banner-zone" class="space-y-2 mb-4"></div>
+
+    <!-- BANDEAU MODE PAPER TRADING (visible uniquement quand le mode est actif) -->
+    <div id="paper-mode-banner" class="hidden mb-4 bg-purple-950/30 border border-purple-800/50 rounded-xl p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="flex-shrink-0 w-9 h-9 rounded-lg bg-purple-950 border border-purple-700/60 flex items-center justify-center text-purple-300">
+                <i class="fa-solid fa-flask"></i>
+            </div>
+            <div class="min-w-0">
+                <div class="text-sm font-bold text-purple-200">
+                    Paper Trading actif — scénario <span id="paper-current-scenario-label" class="font-mono">—</span>
+                </div>
+                <div class="text-[11px] text-gray-400">
+                    Les nouveaux actifs créés seront <b>fictifs</b> et rattachés à ce scénario.
+                    Basculez entre scénarios depuis le menu <i class="fa-solid fa-chevron-down text-[9px] opacity-70"></i> du bouton <b>Paper</b>.
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
+            <label class="flex items-center gap-1.5 text-[11px] text-gray-400 cursor-pointer select-none">
+                <input type="checkbox" id="paper-include-stats" onchange="setPaperIncludeInStats(this.checked)" class="accent-purple-500">
+                Inclure dans les stats
+            </label>
+            <button onclick="deleteAllPaperAssets()" class="px-3 py-1.5 rounded-lg bg-rose-950/60 border border-rose-800/50 text-rose-300 hover:bg-rose-900/70 text-[11px] font-medium transition flex items-center gap-1.5" title="Supprimer toutes les positions papier (tous scénarios confondus)">
+                <i class="fa-solid fa-trash-can text-[10px]"></i> Purger tout
+            </button>
+        </div>
+    </div>
+
+    <!-- BANNIÈRE DCA PLANIFIÉ (Chantier §6) — visible uniquement quand un rappel est déclenché -->
+    <div id="dca-banner" class="hidden mb-4 bg-emerald-950/30 border border-emerald-800/50 rounded-xl p-3 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+            <div class="flex-shrink-0 w-9 h-9 rounded-lg bg-emerald-950 border border-emerald-700/60 flex items-center justify-center text-emerald-300">
+                <i class="fa-solid fa-coins"></i>
+            </div>
+            <div class="min-w-0">
+                <div id="dca-banner-title" class="text-sm font-bold text-emerald-200">
+                    DCA mensuel · à placer
+                </div>
+                <div id="dca-banner-detail" class="text-[11px] text-gray-400">
+                    Suggestion de répartition en cours de calcul…
+                </div>
+            </div>
+        </div>
+        <div class="flex items-center gap-2 flex-shrink-0 flex-wrap">
+            <button onclick="openDcaQuickAdd()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-medium transition flex items-center gap-1.5 shadow-lg shadow-emerald-900/40">
+                <i class="fa-solid fa-plus text-[10px]"></i> Enregistrer l'achat
+            </button>
+            <button onclick="dismissDcaBanner()" class="w-8 h-8 rounded-lg bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 hover:bg-emerald-900/70 transition flex items-center justify-center flex-shrink-0" title="Ignorer pour cette session">
+                <i class="fa-solid fa-xmark text-[11px]"></i>
+            </button>
+        </div>
+    </div>
+
+        <!-- NAVIGATION TABS -->
+    <nav class="flex items-center gap-2 md:gap-6 border-b border-gray-800 mb-6 overflow-x-auto text-sm pb-1">
+        <button onclick="switchTab('tab-accueil')" id="btn-tab-accueil" class="nav-tab active py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
+            <i class="fa-solid fa-house"></i> Accueil
+        </button>
+        <button onclick="switchTab('tab-dashboard')" id="btn-tab-dashboard" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
+            <i class="fa-solid fa-gauge-high"></i> Vue d'ensemble
+        </button>
+        <button onclick="switchTab('tab-inventaire')" id="btn-tab-inventaire" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
+            <i class="fa-solid fa-list-check"></i> Inventaire
+        </button>
+        <button onclick="switchTab('tab-gave')" id="btn-tab-gave" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
+            <i class="fa-solid fa-compass text-amber-400"></i> 4 Cadrans de Gave
+        </button>
+        <button onclick="switchTab('tab-crypto')" id="btn-tab-crypto" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
+            <i class="fa-brands fa-bitcoin text-purple-400"></i> Cryptomonnaies
+        </button>
+        <button onclick="switchTab('tab-hors-gave')" id="btn-tab-hors-gave" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
+            <i class="fa-solid fa-building-columns text-blue-400"></i> Hors-Cadran
+        </button>
+        <button onclick="switchTab('tab-piliers')" id="btn-tab-piliers" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-gray-400 hover:text-gray-200">
+            <i class="fa-solid fa-scale-balanced text-cyan-400"></i> Évaluation 3 Piliers
+        </button>
+        <button onclick="switchTab('tab-annee-n1')" id="btn-tab-annee-n1" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-amber-400 hover:text-amber-300">
+            <i class="fa-solid fa-receipt text-amber-400"></i> Fiscalité & Cessions
+        </button>
+        <button onclick="switchTab('tab-strategies')" id="btn-tab-strategies" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-purple-400 hover:text-purple-300">
+            <i class="fa-solid fa-flask text-purple-400"></i> Stratégies Paper
+        </button>
+        <button onclick="switchTab('tab-objectifs')" id="btn-tab-objectifs" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-cyan-400 hover:text-cyan-300">
+            <i class="fa-solid fa-bullseye text-cyan-400"></i> Objectifs &amp; Projections
+        </button>
+        <button onclick="switchTab('tab-watchlist')" id="btn-tab-watchlist" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-amber-400 hover:text-amber-300 relative">
+            <i class="fa-solid fa-binoculars text-amber-400"></i> Watchlist
+            <span id="watchlist-nav-badge" class="hidden absolute -top-0.5 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-amber-500 text-white text-[9px] font-bold flex items-center justify-center border border-gray-900">0</span>
+        </button>
+        <button onclick="switchTab('tab-ledger')" id="btn-tab-ledger" class="nav-tab py-3 px-2 flex items-center gap-2 whitespace-nowrap text-slate-300 hover:text-white">
+            <i class="fa-solid fa-scroll text-slate-400"></i> Historique
+        </button>
+    </nav>
