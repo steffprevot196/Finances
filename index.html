@@ -3675,7 +3675,7 @@
                             <input type="date" id="cession-date-achat" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500">
                         </div>
                     </div>
-                                        <div class="grid grid-cols-3 gap-3">
+                                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
                         <div>
                             <label class="block text-gray-400 mb-1">Quantité vendue</label>
                             <input type="number" step="any" id="cession-qty" placeholder="1" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500 font-mono">
@@ -3684,12 +3684,20 @@
                         <div>
                             <label class="block text-gray-400 mb-1">Prix de Vente Total (€) *</label>
                             <input type="number" step="any" id="cession-prix-vente" required placeholder="14470.00" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500 font-mono">
-                            <p id="cession-prix-vente-unit" class="text-[10px] text-gray-500 mt-1 font-mono">— €/unité</p>
+                            <label for="cession-prix-vente-unit" class="block text-gray-500 text-[10px] mt-1.5 mb-0.5">
+                                <i class="fa-solid fa-arrow-down-up-across-line text-[9px] mr-0.5 opacity-60"></i>
+                                Prix de vente unitaire (€/unité)
+                            </label>
+                            <input type="number" step="any" id="cession-prix-vente-unit" oninput="updateCessionTotalsFromUnit('vente')" placeholder="ex: 25.34" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-1.5 text-[11px] text-gray-100 font-mono focus:outline-none focus:border-indigo-500">
                         </div>
                         <div>
                             <label class="block text-gray-400 mb-1">Prix d'Achat Total (PRU) *</label>
                             <input type="number" step="any" id="cession-prix-achat" required placeholder="9200.00" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-indigo-500 font-mono">
-                            <p id="cession-prix-achat-unit" class="text-[10px] text-gray-500 mt-1 font-mono">— €/unité</p>
+                            <label for="cession-prix-achat-unit" class="block text-gray-500 text-[10px] mt-1.5 mb-0.5">
+                                <i class="fa-solid fa-arrow-down-up-across-line text-[9px] mr-0.5 opacity-60"></i>
+                                PRU unitaire (€/unité)
+                            </label>
+                            <input type="number" step="any" id="cession-prix-achat-unit" oninput="updateCessionTotalsFromUnit('achat')" placeholder="ex: 16.11" class="w-full bg-gray-900 border border-gray-800 rounded-lg p-1.5 text-[11px] text-gray-100 font-mono focus:outline-none focus:border-indigo-500">
                         </div>
                     </div>
                     <div class="grid grid-cols-2 gap-3 items-end">
