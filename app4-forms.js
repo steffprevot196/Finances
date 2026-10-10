@@ -844,7 +844,13 @@ function renderSearchResults(results) {
 function selectSearchResult(item) {
     document.getElementById('add-name').value = item.name;
     document.getElementById('add-ticker').value = item.ticker;
-    document.getElementById('add-yahoo-ticker').value = item.yahooTicker || '';
+    // Si aucun ticker Yahoo explicite n'est fourni, on utilise le ticker
+// lui-même quand il ressemble à un symbole de marché (suffixe .DE, .PA, .L,
+// .MU, .AS, .MI, .SW… OU purement alphabétique pour les US).
+const yahooFallback = item.yahooTicker
+    || (/\.[A-Z]{2,3}$/.test(item.ticker) ? item.ticker : '')
+    || (/^[A-Z]{1,5}$/.test(item.ticker) ? item.ticker : '');
+document.getElementById('add-yahoo-ticker').value = yahooFallback;
     document.getElementById('add-isin').value = item.isin || '';
 
     let tags = item.tags;
