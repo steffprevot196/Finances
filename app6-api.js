@@ -111,34 +111,57 @@ function saveTwelveDataKey() {
 }
 
 // ---------------------------------------------------------------------
-// Yahoo Finance via proxy CORS public (allorigins.win) — fallback
+// Yahoo Finance via proxy CORS public — fallback multi-fournisseur
 // ---------------------------------------------------------------------
-const YAHOO_PROXY = 'https://api.allorigins.win/raw?url=';
+// L'API Yahoo Finance ne renvoie pas d'en-tête CORS, il faut donc passer
+// par un proxy. On utilise une liste ordonnée : si le premier échoue
+// (timeout, 5xx, blocage réseau), on essaie le suivant.
+const YAHOO_PROXIES = [
+    { name: 'allorigins.win', prefix: 'https://api.allorigins.win/raw?url=' },
+    { name: 'corsproxy.io',   prefix: 'https://corsproxy.io/?url=' }
+];
 
 function yahooChartUrl(symbol, range) {
     return `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}`;
 }
 
+// Tente une URL sur tous les proxies disponibles en cascade.
+// Retourne la réponse JSON parsée ou null si tout échoue.
+async function _fetchViaProxy(url, timeoutMs = 8000) {
+    for (const proxy of YAHOO_PROXIES) {
+        const proxiedUrl = proxy.prefix + encodeURIComponent(url);
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            const res = await fetch(proxiedUrl, { signal: controller.signal });
+            clearTimeout(timer);
+
+            if (!res.ok) {
+                console.warn(`[Yahoo] ${proxy.name} → HTTP ${res.status}`);
+                continue;
+            }
+            return await res.json();
+        } catch (err) {
+            console.warn(`[Yahoo] ${proxy.name} échoué (${err.message})`);
+            // continue vers le proxy suivant
+        }
+    }
+    return null;
+}
+
 // Prix de marché actuel (quote simple)
 async function fetchYahooQuote(symbol) {
-    try {
-        const res = await fetch(YAHOO_PROXY + encodeURIComponent(yahooChartUrl(symbol, '1d')));
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const meta = data?.chart?.result?.[0]?.meta;
-        return meta?.regularMarketPrice ?? null;
-    } catch (err) {
-        console.warn(`Yahoo quote failed for ${symbol}:`, err);
-        return null;
-    }
+    const data = await _fetchViaProxy(yahooChartUrl(symbol, '1d'));
+    if (!data) return null;
+    const meta = data?.chart?.result?.[0]?.meta;
+    return meta?.regularMarketPrice ?? null;
 }
 
 // Historique de prix (1 an par défaut) sous le même format que les autres sources
 async function fetchYahooHistory(symbol, days = 365) {
     const range = days <= 30 ? '1mo' : days <= 90 ? '3mo' : days <= 180 ? '6mo' : days <= 365 ? '1y' : '2y';
-    const res = await fetch(YAHOO_PROXY + encodeURIComponent(yahooChartUrl(symbol, range)));
-    if (!res.ok) throw new Error(`Yahoo HTTP ${res.status}`);
-    const data = await res.json();
+    const data = await _fetchViaProxy(yahooChartUrl(symbol, range), 12000);
+    if (!data) throw new Error('Yahoo indisponible (tous proxies en échec)');
     const result = data?.chart?.result?.[0];
     if (!result?.timestamp || !result?.indicators?.quote?.[0]?.close) return [];
     const closes = result.indicators.quote[0].close;
@@ -514,6 +537,16 @@ function buildCurrencyExposure(list) {
 // Bouton "Historique de prix" : télécharge l'historique réel (1 an) pour
 // toutes les cryptos et devises reconnues du portefeuille.
 async function refreshRealPriceHistory() {
+    if (_priceFetchInProgress) {
+        if (typeof toastWarning === 'function') {
+            toastWarning('Actualisation déjà en cours', 'Patientez la fin de l\'opération précédente.');
+        } else {
+            alert('Une actualisation est déjà en cours. Patientez.');
+        }
+        return;
+    }
+    _priceFetchInProgress = true;
+
     const btn  = document.getElementById('btn-refresh-history');
     const icon = document.getElementById('icon-refresh-history');
     if (icon) icon.classList.add('fa-spin');
@@ -609,11 +642,30 @@ async function refreshRealPriceHistory() {
         hideProgressToast(400);
 
     if (done === 0 && failed.length === 0) {
-        alert('Aucun actif éligible trouvé (Crypto, Devises, ou Actions/ETF avec ticker).');
+        if (typeof toastInfo === 'function') {
+            toastInfo('Aucun actif éligible', 'Ajoutez des cryptos, devises ou actions/ETF avec ticker Yahoo.');
+        }
+    } else if (done === 0 && failed.length > 0) {
+        if (typeof toastError === 'function') {
+            toastError(
+                `Historique : ${failed.length} échec(s)`,
+                failed.slice(0, 3).join(' · ') + (failed.length > 3 ? ' …' : ''),
+                { duration: 9000 }
+            );
+        }
+        console.warn('[History] Échecs :\n' + failed.join('\n'));
+    } else if (failed.length > 0) {
+        if (typeof toastWarning === 'function') {
+            toastWarning(
+                `Historique partiel : ${done} OK, ${failed.length} échec(s)`,
+                failed.slice(0, 2).join(' · ') + (failed.length > 2 ? ' …' : ''),
+                { duration: 8000 }
+            );
+        }
     } else {
-        alert(`Historique de prix réel mis à jour pour ${done} actif(s).` +
-            (failed.length ? `\nÉchecs : ${failed.join(', ')}` : '') +
-            '\n\nLe calcul de risque utilisera désormais les vrais cours pour ces actifs.');
+        if (typeof toastSuccess === 'function') {
+            toastSuccess('Historique de prix mis à jour', `${done} actif(s) — cours réels activés.`);
+        }
     }
 
     // B5 : recharge le cache mémoire des volatilités réelles puis redessine.
@@ -632,6 +684,8 @@ async function refreshRealPriceHistory() {
         typeof renderCorrelationSection === 'function') {
         renderCorrelationSection();
     }
+
+    _priceFetchInProgress = false;
 }
 
 // ---------------------------------------------------------------------
@@ -698,7 +752,16 @@ function primeRealVolCache() {
 // ---------------------------------------------------------------------
 // Actualisation live (crypto + devises) puis mise à jour manuelle groupée
 // ---------------------------------------------------------------------
+// Verrou global : empêche deux actualisations concurrentes (source du 429)
+let _priceFetchInProgress = false;
+
 async function fetchLivePrices() {
+    if (_priceFetchInProgress) {
+        console.warn('[Prices] Actualisation déjà en cours — ignorée.');
+        return;
+    }
+    _priceFetchInProgress = true;
+
     const btn  = document.getElementById('btn-live-prices');
     const icon = document.getElementById('icon-refresh-prices');
     if (icon) icon.classList.add('fa-spin');
@@ -864,15 +927,33 @@ async function fetchLivePrices() {
     // voir la barre à 100 % avant qu'il disparaisse).
     hideProgressToast(400);
 
-    // --- Alertes : APRÈS tous les fetch, une seule fois ---
-    if (sourceErrors.length > 0) {
-        const failedFetch = sourceErrors.some(e => /failed to fetch/i.test(e));
-        alert(`Problème lors de l'actualisation automatique :\n${sourceErrors.join('\n')}` +
-            (failedFetch
-                ? `\n\nSi le message contient "Failed to fetch", un bloqueur de publicité ou les Boucliers Brave/uBlock bloquent probablement api.coingecko.com / api.frankfurter.dev / finnhub.io sur ce site. Essayez de désactiver temporairement les Boucliers pour cette page, ou vérifiez votre connexion internet.`
-                : ''));
+    // --- Notifications : toast non bloquant ---
+    if (sourceErrors.length > 0 && updated === 0) {
+        // Échec total : toast d'erreur détaillé
+        if (typeof toastError === 'function') {
+            toastError(
+                `Aucun cours n'a pu être récupéré (${sourceErrors.length} actif(s))`,
+                sourceErrors.slice(0, 3).join(' · ') +
+                (sourceErrors.length > 3 ? ` (+${sourceErrors.length - 3} autres — voir console)` : ''),
+                { duration: 10000 }
+            );
+        }
+        console.warn('[Prices] Échecs détaillés :\n' + sourceErrors.join('\n'));
+    } else if (sourceErrors.length > 0) {
+        // Succès partiel : toast d'avertissement discret
+        if (typeof toastWarning === 'function') {
+            toastWarning(
+                `${updated} cours mis à jour, ${sourceErrors.length} échec(s)`,
+                sourceErrors.slice(0, 2).join(' · ') +
+                (sourceErrors.length > 2 ? ' …' : ''),
+                { duration: 7000 }
+            );
+        }
     } else if (updated > 0) {
-        alert(`Cours actualisés automatiquement pour ${updated} actif(s) (crypto, devises, actions/ETF, or).`);
+        // Succès total
+        if (typeof toastSuccess === 'function') {
+            toastSuccess(`Cours actualisés`, `${updated} actif(s) mis à jour.`);
+        }
     }
 
     // --- Restauration explicite du contenu (si refreshAllUI() n'a pas déjà
@@ -898,6 +979,8 @@ async function fetchLivePrices() {
 
     const manualAssets = assets.filter(a => !autoUpdatedIds.has(a.id));
     if (manualAssets.length) openManualRefreshModal(manualAssets);
+
+    _priceFetchInProgress = false;
 }
 
 // ---------------------------------------------------------------------
