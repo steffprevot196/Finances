@@ -848,7 +848,7 @@ function selectSearchResult(item) {
 // lui-même quand il ressemble à un symbole de marché (suffixe .DE, .PA, .L,
 // .MU, .AS, .MI, .SW… OU purement alphabétique pour les US).
 const yahooFallback = item.yahooTicker
-    || (/\.[A-Z]{2,3}$/.test(item.ticker) ? item.ticker : '')
+    || (/\.[A-Z]{1,3}$/.test(item.ticker) ? item.ticker : '')   // ← {1,3} au lieu de {2,3}
     || (/^[A-Z]{1,5}$/.test(item.ticker) ? item.ticker : '');
 document.getElementById('add-yahoo-ticker').value = yahooFallback;
     document.getElementById('add-isin').value = item.isin || '';
