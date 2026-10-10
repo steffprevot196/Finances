@@ -799,7 +799,7 @@ function renderAssetLotsTable(asset) {
             <td class="p-2.5 text-right ${l._remaining > 0 ? 'text-emerald-400 font-bold' : 'text-gray-500'}">${l._remaining}</td>
             <td class="p-2.5 text-right text-gray-400">${formatUnitPrice(l._lotUnitCost)}</td>
             <td class="p-2.5 text-right text-blue-300">${formatUnitPrice(l._cumPRU)}${pruArrow}</td>
-            <td class="p-2.5 text-right text-gray-300">${noMarket ? '—' : formatUnitPrice(enriched.currentUnitValue)}</td>
+            <td class="p-2.5 text-right text-gray-300" title="(Prix d'achat unitaire × quantité achetée) + frais">${formatEUR((l.qty * l.price) + (l.frais || 0))}</td>
             <td class="p-2.5 text-right ${sold || noMarket ? 'text-gray-500' : (isPos ? 'text-emerald-400' : 'text-rose-400')}">
                 ${sold || noMarket
                     ? '—'
@@ -1087,7 +1087,7 @@ function exportLotsCSV(assetId) {
     // En-tête
     rows.push([
         'Date', 'Référence', 'Qté achetée', 'Qté restante',
-        'Prix lot', 'PRU cumulé', 'Valeur actuelle', 'P&L latent (€)', 'P&L (%)', 'Frais (€)'
+        'Prix lot', 'PRU cumulé', 'Coût d\'acquisition (€)', 'P&L latent (€)', 'P&L (%)', 'Frais (€)'
     ].join(';'));
 
     // Lignes
@@ -1102,7 +1102,7 @@ function exportLotsCSV(assetId) {
             fmtNum(l._remaining, 8),
             fmtNum(l._lotUnitCost, 4),
             fmtNum(l._cumPRU, 4),
-            fmtNum(enriched.currentUnitValue, 4),
+            fmtNum((l.qty * l.price) + (l.frais || 0), 2),
             hasMarket ? fmtNum(l._pnlTotal, 2) : '',
             hasMarket ? fmtNum(l._pnlPct, 2) : '',
             fmtNum(l.frais || 0, 2)
