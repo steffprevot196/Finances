@@ -554,6 +554,37 @@ window.addEventListener('DOMContentLoaded', () => {
         tickerInput.addEventListener('input', updateEsgPreview);
     }
 
+// 9c-ter. Résolution automatique ISIN → ticker Yahoo
+//   Quand l'utilisateur tape un ISIN valide (format 12 chars), on interroge
+//   Finnhub pour récupérer le symbole de marché et on pré-remplit les
+//   champs Ticker + Ticker Yahoo si vides.
+const isinInput = document.getElementById('add-isin');
+if (isinInput) {
+    isinInput.addEventListener('blur', async () => {
+        const isin = isinInput.value.trim().toUpperCase();
+        if (!/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/.test(isin)) return;
+
+        // Ne pas écraser une saisie manuelle
+        const tickerInput = document.getElementById('add-ticker');
+        const yahooInput  = document.getElementById('add-yahoo-ticker');
+        if (tickerInput.value.trim() && yahooInput.value.trim()) return;
+
+        if (typeof searchFinnhubSymbol !== 'function' || !finnhubApiKey) return;
+        try {
+            const results = await searchFinnhubSymbol(isin);
+            if (!results.length) return;
+            const best = results[0];   // Finnhub trie par pertinence
+
+            if (!tickerInput.value.trim()) tickerInput.value = best.ticker;
+            if (!yahooInput.value.trim() && /\.[A-Z]{2,3}$/.test(best.ticker)) {
+                yahooInput.value = best.ticker;
+            }
+            const nameInput = document.getElementById('add-name');
+            if (!nameInput.value.trim()) nameInput.value = best.name;
+        } catch (_) { /* silencieux : l'utilisateur saisira manuellement */ }
+    });
+}
+
     // 9d. Flag « champ Taux de change touché » (Chantier 1.2)
     //     Empêche _autoFillFxRate d'écraser une saisie manuelle de l'utilisateur
     //     pendant que la requête API Frankfurter est en vol.
