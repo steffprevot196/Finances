@@ -2027,7 +2027,14 @@ function buildPortfolioTimeline(assetList) {
     const todayKey = new Date().toDateString();
 
     const assetPoints = list.map(a => {
-        // --- 1) Récupère l'historique existant (nettoyé) ---
+        const curInv = a.invested || 0;
+        const curVal = a.value || 0;
+
+        // --- 1) Récupère l'historique existant, AVEC FILTRE ANTI-CORRUPTION ---
+        // Filtre : rejette tout point dont invested OU value est > 5× la
+        // valeur actuelle. Signature typique d'entrées historiques corrompues
+        // (imports d'anciennes versions, données Drive obsolètes, saisies
+        // fautives corrigées plus tard sans mettre à jour l'historique).
         let pts = (a.history || [])
             .map(h => {
                 const d = parseFlexDate(h.date);
@@ -2038,21 +2045,27 @@ function buildPortfolioTimeline(assetList) {
                 return { date: d, invested: inv, value: val };
             })
             .filter(Boolean)
-            .filter(p => p.date.toDateString() !== todayKey);
+            .filter(p => {
+                // Garde-fou anti-corruption v2 : plus strict que la v1.
+                // Un point est rejeté si invested OU value dépasse 3× la
+                // valeur actuelle. Seuil abaissé de 5× à 3× car sur des
+                // portefeuilles où plusieurs points historiques dépassent
+                // légèrement le seuil 5×, leur SOMME peut encore produire
+                // un pic incohérent.
+                if (curInv > 0 && p.invested > curInv * 3) return false;
+                if (curVal > 0 && p.value    > curVal * 3) return false;
+                return p.date.toDateString() !== todayKey;
+            });
 
         // --- 2) Si AUCUN point valide → 1 SEUL point à la date d'acquisition ---
-        // (≠ v2 qui cumulait tous les lots : c'était la source du pic à 500k)
         if (pts.length === 0) {
             const acqDate = _getFirstAcquisitionDate(a);
-            const inv = a.invested || 0;
-            if (acqDate && inv > 0) {
-                pts.push({ date: acqDate, invested: inv, value: inv });
+            if (acqDate && curInv > 0) {
+                pts.push({ date: acqDate, invested: curInv, value: curInv });
             }
         }
 
         // --- 3) Toujours un point "aujourd'hui" ---
-        const curInv = a.invested || 0;
-        const curVal = a.value || 0;
         if (curInv > 0 || curVal > 0) {
             pts.push({ date: new Date(), invested: curInv, value: curVal });
         }
