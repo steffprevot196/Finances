@@ -1992,69 +1992,65 @@ function undoCount() { return undoStack.length; }
 // TIMELINE PORTEFEUILLE (utilisée par tous les graphiques)
 // =====================================================================
 // =====================================================================
-// TIMELINE PORTEFEUILLE — version robuste (fix incohérence 2026)
+// TIMELINE PORTEFEUILLE — v3 (fix définitif incohérence 2026)
 // ---------------------------------------------------------------------
-// Le bug historique : les actifs importés (CSV, JSON, Drive) n'ont pas
-// d'entrée `history[]`. La courbe restait plate à 0 jusqu'à "aujourd'hui",
-// puis sautait brutalement à la valeur courante — rendant le graphique
-// incohérent avec les KPI du bandeau.
-//
-// Nouvelle logique :
-//   1. On nettoie et trie l'historique existant
-//   2. Si l'historique est vide/insuffisant, on le SYNTHÉTISE à partir
-//      des lots (chaque lot génère un point {date_achat, invested_cumulé})
-//   3. On force TOUJOURS un point "aujourd'hui" avec les valeurs courantes
-//   4. On déduplique par jour civil (pas par timestamp ms)
+// 3 bugs corrigés par rapport à la v2 :
+//   A. Ne cumule PLUS les lots (1 point par actif max à la date d'acquisition)
+//      → évite les pics absurdes quand un actif a une quantité énorme
+//   B. Utilise statsAssets() pour respecter la préférence Paper Trading
+//      → plus de courbe vide quand le mode paper est actif
+//   C. Fallback en cascade : lots[].date → purchaseDate → buys[].date
+//      → aucun actif n'est plus "invisible" faute de date
 // =====================================================================
-function buildPortfolioTimeline(assetList = assets) {
+function _getFirstAcquisitionDate(asset) {
+    let earliest = null;
+    (asset.lots || []).forEach(l => {
+        const d = parseFlexDate(l.date);
+        if (d && (!earliest || d < earliest)) earliest = d;
+    });
+    if (!earliest && asset.purchaseDate) {
+        const d = parseFlexDate(asset.purchaseDate);
+        if (d) earliest = d;
+    }
+    if (!earliest && Array.isArray(asset.buys)) {
+        for (const b of asset.buys) {
+            const d = parseFlexDate(b.date);
+            if (d && (!earliest || d < earliest)) earliest = d;
+        }
+    }
+    return earliest;
+}
+
+function buildPortfolioTimeline(assetList) {
+    // Utilise statsAssets() par défaut (respecte l'option Paper Trading)
+    const list = assetList || (typeof statsAssets === 'function' ? statsAssets() : assets);
     const todayKey = new Date().toDateString();
 
-    const assetPoints = assetList.map(a => {
-        // --- 1) Nettoie l'historique existant ---
+    const assetPoints = list.map(a => {
+        // --- 1) Récupère l'historique existant (nettoyé) ---
         let pts = (a.history || [])
             .map(h => {
                 const d = parseFlexDate(h.date);
                 if (!d) return null;
-                return {
-                    date: d,
-                    invested: Number.isFinite(h.invested) ? h.invested : null,
-                    value: Number.isFinite(h.value) ? h.value : null
-                };
+                const inv = Number(h.invested);
+                const val = Number(h.value);
+                if (!Number.isFinite(inv) || !Number.isFinite(val)) return null;
+                return { date: d, invested: inv, value: val };
             })
-            .filter(p => p && Number.isFinite(p.invested) && Number.isFinite(p.value));
+            .filter(Boolean)
+            .filter(p => p.date.toDateString() !== todayKey);
 
-        // --- 2) Synthèse à partir des lots si historique insuffisant ---
-        const uniqueDates = new Set(pts.map(p => p.date.toDateString()));
-        if (uniqueDates.size < 1) {
-            const sortedLots = (a.lots || [])
-                .map(l => ({
-                    qty: Number(l.qty) || 0,
-                    price: Number(l.price) || 0,
-                    frais: Number(l.frais) || 0,
-                    _date: parseFlexDate(l.date)
-                }))
-                .filter(l => l._date && l.qty > 0)
-                .sort((x, y) => x._date - y._date);
-
-            if (sortedLots.length > 0) {
-                let cumInv = 0;
-                sortedLots.forEach(l => {
-                    const lotCost = l.qty * l.price + l.frais;
-                    cumInv += lotCost;
-                    pts.push({
-                        date: l._date,
-                        invested: cumInv,
-                        value: cumInv
-                    });
-                });
-            } else if (a.purchaseDate && (a.invested || 0) > 0) {
-                const d = parseFlexDate(a.purchaseDate);
-                if (d) pts.push({ date: d, invested: a.invested, value: a.invested });
+        // --- 2) Si AUCUN point valide → 1 SEUL point à la date d'acquisition ---
+        // (≠ v2 qui cumulait tous les lots : c'était la source du pic à 500k)
+        if (pts.length === 0) {
+            const acqDate = _getFirstAcquisitionDate(a);
+            const inv = a.invested || 0;
+            if (acqDate && inv > 0) {
+                pts.push({ date: acqDate, invested: inv, value: inv });
             }
         }
 
-        // --- 3) Point "aujourd'hui" forcé (dédupliqué par jour civil) ---
-        pts = pts.filter(p => p.date.toDateString() !== todayKey);
+        // --- 3) Toujours un point "aujourd'hui" ---
         const curInv = a.invested || 0;
         const curVal = a.value || 0;
         if (curInv > 0 || curVal > 0) {
@@ -2065,7 +2061,7 @@ function buildPortfolioTimeline(assetList = assets) {
         return pts;
     });
 
-    // --- 4) Union des dates, dédupliquée par JOUR (pas par ms) ---
+    // --- 4) Union des dates, dédupliquée par jour civil ---
     const dayMap = new Map();
     assetPoints.forEach(pts => pts.forEach(p => {
         const key = p.date.toISOString().slice(0, 10);
@@ -2093,7 +2089,59 @@ function buildPortfolioTimeline(assetList = assets) {
         valueSeries.push(Math.round(totalValue * 100) / 100);
     });
 
+    // --- 5) Auto-diagnostic : si le pic dépasse 2× le total investi actuel,
+    //         on log un warning avec le top 5 des actifs (utile en console).
+    const currentTotalInv = list.reduce((s, a) => s + (a.invested || 0), 0);
+    const maxInv = Math.max(0, ...investedSeries);
+    if (currentTotalInv > 0 && maxInv > currentTotalInv * 2) {
+        console.warn(
+            `[Timeline] Anomalie détectée : pic investi (${maxInv.toFixed(0)} €) ` +
+            `supérieur à 2× le total actuel (${currentTotalInv.toFixed(0)} €). ` +
+            `Lancez debugPortfolioData() dans la console pour identifier l'actif fautif.`
+        );
+    }
+
     return { labels, investedSeries, valueSeries, rawDates: allDates };
+}
+
+// =====================================================================
+// DIAGNOSTIC CONSOLE — debugPortfolioData()
+// ---------------------------------------------------------------------
+// À taper dans la console (F12) pour identifier les actifs anormaux :
+//   • trie par invested décroissant
+//   • affiche les 10 premiers avec leur poids % dans le total
+//   • signale les actifs dont l'invested > 30 % du total (suspects)
+// =====================================================================
+function debugPortfolioData() {
+    console.log('%c=== Diagnostic Patrimonial ===', 'color:#8b5cf6;font-weight:bold;font-size:13px;');
+    const real = assets.filter(a => !isPaperAsset(a));
+    const sorted = [...real].sort((a, b) => (b.invested || 0) - (a.invested || 0));
+    const totalInv = sorted.reduce((s, a) => s + (a.invested || 0), 0);
+    const totalVal = sorted.reduce((s, a) => s + (a.value || 0), 0);
+
+    console.log(`Actifs réels      : ${real.length}`);
+    console.log(`Actifs papier     : ${assets.length - real.length}`);
+    console.log(`Total investi     : ${formatEUR(totalInv)}`);
+    console.log(`Total valeur      : ${formatEUR(totalVal)}`);
+    console.log(`P&L latent        : ${formatEUR(totalVal - totalInv)}`);
+    console.log('');
+
+    console.log('%cTop 10 actifs par montant investi :', 'color:#06b6d4;font-weight:bold;');
+    console.table(sorted.slice(0, 10).map(a => {
+        const firstAcq = _getFirstAcquisitionDate(a);
+        return {
+            Nom: a.name,
+            Ticker: a.ticker || '—',
+            Investi: formatEUR(a.invested || 0),
+            Valeur: formatEUR(a.value || 0),
+            'Poids %': totalInv > 0 ? ((a.invested / totalInv) * 100).toFixed(1) + '%' : '0%',
+            'Nb lots': (a.lots || []).length,
+            'Date 1er achat': firstAcq ? firstAcq.toLocaleDateString('fr-FR') : '—',
+            Suspect: totalInv > 0 && (a.invested / totalInv) > 0.30 ? '⚠️ >30%' : ''
+        };
+    }));
+
+    return { totalInv, totalVal, count: real.length };
 }
 
 function filterTimelineByRange(tl, range) {

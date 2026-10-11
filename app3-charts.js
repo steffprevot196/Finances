@@ -1785,32 +1785,30 @@ function setAnnualPnlMode(mode) {
 }
 
 function computeAnnualPnlData() {
-    const realAssets = assets.filter(a => !isPaperAsset(a));
-    const realCessions = cessions;
+    // ✅ FIX B : utilise statsAssets() pour respecter l'option Paper Trading.
+    //    Avant, le filtre en dur `!isPaperAsset(a)` éliminait TOUS les actifs
+    //    quand le mode paper était actif (ce qui donnait "0 actif détenu").
+    const realAssets = (typeof statsAssets === 'function') ? statsAssets() : assets;
+    const realCessions = (typeof statsCessions === 'function') ? statsCessions() : cessions;
 
-    const allDates = [];
+    // Années concernées : union des années d'acquisition + de vente + année courante
+    const yearsSet = new Set();
     realAssets.forEach(a => {
-        (a.lots || []).forEach(l => {
-            const d = parseFlexDate(l.date);
-            if (d) allDates.push(d);
-        });
-        if (a.purchaseDate) {
-            const d = parseFlexDate(a.purchaseDate);
-            if (d) allDates.push(d);
-        }
+        const firstAcq = (typeof _getFirstAcquisitionDate === 'function')
+            ? _getFirstAcquisitionDate(a) : null;
+        if (firstAcq) yearsSet.add(firstAcq.getFullYear());
     });
     realCessions.forEach(c => {
         const d = parseFlexDate(c.dateVente);
-        if (d) allDates.push(d);
+        if (d) yearsSet.add(d.getFullYear());
     });
-    if (!allDates.length) return null;
+    yearsSet.add(new Date().getFullYear());
 
-    const firstYear = Math.min(...allDates.map(d => d.getFullYear()));
-    const lastYear = new Date().getFullYear();
+    if (yearsSet.size === 0) return null;
+    const years = [...yearsSet].sort((a, b) => a - b);
 
-    const years = [];
-    for (let y = firstYear; y <= lastYear; y++) {
-        // --- Réalisé ---
+    return years.map(y => {
+        // --- Réalisé (cessions dont dateVente ∈ Y) ---
         let realizedPnl = 0, realizedBase = 0, realizedCount = 0;
         realCessions.forEach(c => {
             const d = parseFlexDate(c.dateVente);
@@ -1821,15 +1819,11 @@ function computeAnnualPnlData() {
             realizedCount++;
         });
 
-        // --- Latent : actifs acquis en Y, encore détenus ---
+        // --- Latent : actifs acquis en Y et encore détenus ---
         let latentPnl = 0, latentBase = 0, latentCount = 0;
         realAssets.forEach(a => {
-            let firstAcq = null;
-            (a.lots || []).forEach(l => {
-                const d = parseFlexDate(l.date);
-                if (d && (!firstAcq || d < firstAcq)) firstAcq = d;
-            });
-            if (!firstAcq && a.purchaseDate) firstAcq = parseFlexDate(a.purchaseDate);
+            const firstAcq = (typeof _getFirstAcquisitionDate === 'function')
+                ? _getFirstAcquisitionDate(a) : null;
             if (!firstAcq || firstAcq.getFullYear() !== y) return;
 
             latentPnl  += (a.value || 0) - (a.invested || 0);
@@ -1837,7 +1831,7 @@ function computeAnnualPnlData() {
             latentCount++;
         });
 
-        years.push({
+        return {
             year: y,
             realizedPnl,
             realizedPct: realizedBase > 0 ? (realizedPnl / realizedBase) * 100 : 0,
@@ -1845,9 +1839,8 @@ function computeAnnualPnlData() {
             latentPnl,
             latentPct: latentBase > 0 ? (latentPnl / latentBase) * 100 : 0,
             latentCount
-        });
-    }
-    return years;
+        };
+    });
 }
 
 function renderAnnualPnlChart() {
@@ -1925,17 +1918,17 @@ function renderAnnualPnlChart() {
                 {
                     label: isPct ? 'P&L réalisé (%)' : 'P&L réalisé (€)',
                     data: realizedValues,
-                    backgroundColor: realizedValues.map(v => v >= 0 ? 'rgba(59,130,246,0.80)' : 'rgba(239,68,68,0.80)'),
-                    borderColor: realizedValues.map(v => v >= 0 ? '#3b82f6' : '#ef4444'),
-                    borderWidth: 1,
+                    backgroundColor: realizedValues.map(v => v >= 0 ? 'rgba(16,185,129,0.85)' : 'rgba(244,63,94,0.85)'),
+                    borderColor: realizedValues.map(v => v >= 0 ? '#10b981' : '#f43f5e'),
+                    borderWidth: 1.5,
                     borderRadius: 4
                 },
                 {
                     label: isPct ? 'P&L latent (%)' : 'P&L latent (€)',
                     data: latentValues,
-                    backgroundColor: latentValues.map(v => v >= 0 ? 'rgba(168,85,247,0.80)' : 'rgba(244,63,94,0.80)'),
-                    borderColor: latentValues.map(v => v >= 0 ? '#a855f7' : '#f43f5e'),
-                    borderWidth: 1,
+                    backgroundColor: latentValues.map(v => v >= 0 ? 'rgba(59,130,246,0.75)' : 'rgba(245,158,11,0.75)'),
+                    borderColor: latentValues.map(v => v >= 0 ? '#3b82f6' : '#f59e0b'),
+                    borderWidth: 1.5,
                     borderRadius: 4
                 }
             ]
@@ -1949,14 +1942,16 @@ function renderAnnualPnlChart() {
                     callbacks: {
                         label: (ctx) => {
                             const v = ctx.parsed.y;
-                            if (isPct) return `${ctx.dataset.label} : ${v >= 0 ? '+' : ''}${v.toFixed(2)} %`;
-                            return `${ctx.dataset.label} : ${v >= 0 ? '+' : ''}${formatEUR(v)}`;
+                            const emoji = v >= 0 ? '🟢' : '🔴';
+                            if (isPct) return `${emoji} ${ctx.dataset.label} : ${v >= 0 ? '+' : ''}${v.toFixed(2)} %`;
+                            return `${emoji} ${ctx.dataset.label} : ${v >= 0 ? '+' : ''}${formatEUR(v)}`;
                         },
                         afterBody: (ctx) => {
                             const d = data[ctx[0].dataIndex];
                             const lines = [];
-                            if (d.realizedCount > 0) lines.push(`${d.realizedCount} cession(s) cette année`);
-                            if (d.latentCount > 0)   lines.push(`${d.latentCount} actif(s) acquis cette année`);
+                            if (d.realizedCount > 0) lines.push(`📤 ${d.realizedCount} cession(s) cette année`);
+                            if (d.latentCount > 0)   lines.push(`📦 ${d.latentCount} actif(s) acquis cette année, encore détenu(s)`);
+                            if (d.realizedCount === 0 && d.latentCount === 0) lines.push('Aucun mouvement cette année');
                             return lines;
                         }
                     }
