@@ -162,14 +162,35 @@ async function _fetchViaProxy(url, timeoutMs = 5000) {
 //   fournisseur de données. On teste une courte liste de variantes
 //   en cascade si le symbole principal échoue.
 const YAHOO_TICKER_FALLBACKS = {
-    'IGLN.L': ['SGLN.L', 'IGLN.AS', 'PPFD.AS'],   // Or physique (LSE, Amsterdam)
-    'ISLN.L': ['SSLN.L', 'ISLN.AS'],               // Argent physique
-    'SGLN.L': ['IGLN.L'],                          // Or (alias inverse)
-    'CEMA.L': ['CEMA.AS', 'CEMAU.L'],              // MSCI EM Asia
-    'HMAF.L': ['HMAF.AS', 'HMAF.DE'],              // HSBC MSCI AC Far East
-    'XDW0.L': ['XDW0.DE', 'XDW0.MI'],              // MSCI World
-    'IGLN.AS': ['IGLN.L'],                         // Amsterdam → Londres
-    'SGLN.AS': ['SGLN.L']
+    // --- Or / Argent physique ---
+    'IGLN.L':  ['SGLN.L', 'IGLN.AS', 'PPFD.AS'],
+    'ISLN.L':  ['SSLN.L', 'ISLN.AS'],
+    'SGLN.L':  ['IGLN.L'],
+    'IGLN.AS': ['IGLN.L'],
+    'SGLN.AS': ['SGLN.L'],
+
+    // --- ETF MSCI EM Asia (iShares) ---
+    // CEMA.L est listé à Londres ; ses équivalents sont à Amsterdam et sur Xetra.
+    'CEMA.L':  ['CEMA.AS', 'CEMAU.L', 'CEMA.DE', 'IEMA.L', 'IEMA.AS'],
+    'CEMA.AS': ['CEMA.L'],
+    'IEMA.L':  ['IEMA.AS', 'CEMA.L'],
+
+    // --- ETF HSBC MSCI AC Far East ---
+    'HMAF.L':  ['HMAF.AS', 'HMAF.DE'],
+
+    // --- ETF MSCI World (Xtrackers) ---
+    'XDW0.L':  ['XDW0.DE', 'XDW0.MI', 'XDWD.DE'],
+
+    // --- ETF S&P 500 Energy (iShares) ---
+    // QDVF.MU est listé à Munich ; Yahoo ne le couvre pas bien.
+    // On tente les places principales (Xetra, Francfort, Milan, Londres, Amsterdam).
+    'QDVF.MU': ['QDVF.DE', 'QDVF.F', 'QDVF.MI', 'IS0D.DE', 'I5E3.DE', 'IUES.L', 'IUES.AS'],
+    'QDVF.DE': ['QDVF.MU', 'QDVF.F'],
+    'QDVF.F':  ['QDVF.DE', 'QDVF.MU'],
+
+    // --- ETF S&P 500 Energy (Amundi/BnP alternatives) ---
+    'IUES.L':  ['IUES.AS', 'QDVF.DE'],
+    'IUES.AS': ['IUES.L']
 };
 
 async function fetchYahooQuote(symbol) {
@@ -189,24 +210,42 @@ async function fetchYahooQuote(symbol) {
     return null;
 }
 
-// Extraction bas niveau du prix, avec correction pence→livres pour les .L
+// Extraction bas niveau du prix, avec correction pence→livres pour les .L.
+//
+// ⚠️ Retourne null en cas de 404 SILENCIEUX (ticker inexistant chez Yahoo)
+//    pour que la boucle de fallback continue à essayer les autres symboles.
+//    Le 404 est un cas normal : certains ETF listés à Munich (QDVF.MU) ou
+//    à Londres (CEMA.L) ne sont tout simplement pas couverts par Yahoo.
 async function _fetchYahooQuoteRaw(symbol) {
-    const data = await _fetchViaProxy(yahooChartUrl(symbol, '1d'));
-    if (!data) return null;
-    const meta = data?.chart?.result?.[0]?.meta;
-    let p = meta?.regularMarketPrice;
-    if (!Number.isFinite(p) || p <= 0) return null;
+    try {
+        const data = await _fetchViaProxy(yahooChartUrl(symbol, '1d'));
+        if (!data) return null;
 
-    // Correction pence → livres pour les symboles LSE
-    if (/\.L$/i.test(symbol) && p > 100) {
-        // Note : les prix des ETF chers (ex: CSPX.L ≈ 500 £) sont normalement
-        // retournés en livres. On ne divise QUE si le prix dépasse un seuil
-        // élevé qui trahit une cotation en pence.
-        // ⚠ Exception : les ETF > 100 £ légitimes. Pour ces cas, la valeur
-        // retournée sera de toute façon saisie manuellement.
-        p = p / 100;
+        // Yahoo renvoie ceci pour un ticker inconnu :
+        //   { chart: { error: { code: 'Not Found', description: 'No data found, symbol may be delisted' } } }
+        const chartError = data?.chart?.error;
+        if (chartError) {
+            // Log informatif (pas d'alerte, c'est un cas normal pour les
+            // tickers exotiques type Munich)
+            console.info(`[Yahoo] Ticker ${symbol} non reconnu : ${chartError.description || chartError.code}`);
+            return null;
+        }
+
+        const meta = data?.chart?.result?.[0]?.meta;
+        let p = meta?.regularMarketPrice;
+        if (!Number.isFinite(p) || p <= 0) return null;
+
+        // Correction pence → livres pour les symboles LSE
+        if (/\.L$/i.test(symbol) && p > 100) {
+            p = p / 100;
+        }
+        return p;
+    } catch (err) {
+        // Erreur réseau (timeout, CORS, etc.) : on laisse remonter pour
+        // que la boucle principale puisse tenter un autre proxy ou un autre
+        // symbole. Le 404 silencieux ci-dessus est déjà géré par le retour null.
+        throw err;
     }
-    return p;
 }
 
 // Historique de prix (1 an par défaut) sous le même format que les autres sources

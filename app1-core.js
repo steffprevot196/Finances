@@ -355,7 +355,30 @@ const MSCI_WORLD_ANNUAL_RETURNS_EUR = {
     2019: 0.300, 2020: 0.063, 2021: 0.287, 2022: -0.128, 2023: 0.196, 2024: 0.260
 };
 
-const CRYPTO_COINGECKO_IDS = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', ADA: 'cardano', XRP: 'ripple', DOGE: 'dogecoin', BNB: 'binancecoin', LTC: 'litecoin', DOT: 'polkadot', AVAX: 'avalanche-2', MATIC: 'matic-network', LINK: 'chainlink' };
+const CRYPTO_COINGECKO_IDS = {
+    BTC: 'bitcoin',
+    ETH: 'ethereum',
+    SOL: 'solana',
+    ADA: 'cardano',
+    XRP: 'ripple',
+    DOGE: 'dogecoin',
+    BNB: 'binancecoin',
+    LTC: 'litecoin',
+    DOT: 'polkadot',
+    AVAX: 'avalanche-2',
+    MATIC: 'matic-network',
+    POL: 'polygon-ecosystem-token',   // Polygon renommé MATIC → POL en sept. 2024
+    LINK: 'chainlink',
+    PIGCOIN: 'pigcoin-2',
+    SHIB: 'shiba-inu',
+    TRX: 'tron',
+    UNI: 'uniswap',
+    ATOM: 'cosmos',
+    NEAR: 'near',
+    APT: 'aptos',
+    ARB: 'arbitrum',
+    OP: 'optimism'
+};
 const CASH_CURRENCY_TICKERS = ['USD', 'JPY', 'CHF', 'GBP'];
 
 // =====================================================================
