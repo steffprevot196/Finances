@@ -338,6 +338,13 @@ window.addEventListener('DOMContentLoaded', () => {
         initMcWorkerModule();
     }
 
+    // 8n-octodecies. Filtres par actif sur les onglets Accueil et Vue d'ensemble.
+    //                Injecte deux barres de filtres en haut de chaque onglet
+    //                et rend statsAssets()/statsCessions() filter-aware.
+    if (typeof initTabFiltersModule === 'function') {
+        initTabFiltersModule();
+    }
+
     // Hook sur refreshBenchmarkSeries : dès que le benchmark est
     // téléchargé ou rafraîchi, on recalcule le comparateur CW8 et on
     // re-rend si l'onglet dashboard est actif.
