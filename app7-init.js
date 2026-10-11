@@ -51,7 +51,20 @@ window.addEventListener('DOMContentLoaded', () => {
     calculateMetalTaxSim();
 
     // 6. Préchargement du cache de volatilité réelle (async, se termine plus tard)
-    primeRealVolCache();
+    //    + reconstruction des historiques depuis les cours réels déjà en cache.
+    //    Cela permet à la Trajectoire Patrimoniale d'afficher une vraie courbe
+    //    "Valeur" qui se détache de "Investi" dès le premier rendu, sans
+    //    attendre que l'utilisateur clique sur "Historique de prix".
+    primeRealVolCache().then(() => {
+        if (typeof rebuildAllHistoriesFromRealPrices === 'function') {
+            const n = rebuildAllHistoriesFromRealPrices();
+            if (n > 0) {
+                saveToStorage();
+                if (typeof refreshAllUI === 'function') refreshAllUI();
+                console.info(`[History] ${n} historique(s) reconstruit(s) au boot.`);
+            }
+        }
+    }).catch(() => {});
 
     // 7. Pop-up de reclassement Action/ETF si nécessaire
     maybeShowReclassModal();

@@ -745,6 +745,20 @@ async function refreshRealPriceHistory() {
     // écrasé par le rendu réel de renderInventoryTable().
     await primeRealVolCache();
 
+    // ⭐ NOUVEAU : reconstruit l'historique de valorisation de chaque actif
+    // à partir des cours réels + des lots détenus. C'est ce qui permet à la
+    // Trajectoire Patrimoniale d'afficher une vraie courbe "Valeur" qui se
+    // détache du "Investi" même sur les années passées.
+    try {
+        const n = rebuildAllHistoriesFromRealPrices();
+        if (n > 0) {
+            saveToStorage();
+            console.info(`[History] ${n} historique(s) reconstruit(s) depuis les cours réels.`);
+        }
+    } catch (err) {
+        console.warn('[History] Reconstruction échouée :', err);
+    }
+
     // Chantier §5 — invalide la matrice de corrélation : de nouvelles séries
     // réelles viennent d'être chargées, les corrélations doivent être
     // recalculées au prochain rendu du dashboard.
@@ -758,6 +772,112 @@ async function refreshRealPriceHistory() {
 
     _priceFetchInProgress = false;
 }
+
+// =====================================================================
+// RECONSTRUCTION D'HISTORIQUE DEPUIS LES COURS RÉELS (fix 2026)
+// ---------------------------------------------------------------------
+// Problème : quand vous cliquez sur "Historique de prix", les cours sont
+// stockés dans realSeriesCache (utilisé pour la volatilité, le benchmark,
+// la corrélation) mais JAMAIS injectés dans a.history[]. Résultat : la
+// Trajectoire Patrimoniale n'a que 2 points par actif (date d'achat +
+// aujourd'hui), et Investi = Valeur sur toute la période — la courbe
+// "Valeur" reste collée à la courbe "Investi".
+//
+// Solution : pour chaque actif couvert par une série réelle, on reconstruit
+// un historique complet en combinant :
+//   • La quantité détenue à chaque date (issue des lots)
+//   • Le cours réel à cette date (issu de realSeriesCache)
+//
+// Échantillonnage : 1 point par semaine (dimanche) pour limiter la taille
+// localStorage. Limite : 3 ans d'historique maximum.
+// =====================================================================
+
+function rebuildHistoryFromRealPrices(asset) {
+    const ticker = (asset.ticker || '').toUpperCase();
+    const series = realSeriesCache[ticker];
+    if (!Array.isArray(series) || series.length < 2) return false;
+
+    // Récupère les lots triés par date
+    const lots = (asset.lots || [])
+        .map(l => ({
+            d: parseFlexDate(l.date),
+            q: Number(l.qty) || 0,
+            p: Number(l.price) || 0,
+            f: Number(l.frais) || 0
+        }))
+        .filter(l => l.d && l.q > 0)
+        .sort((a, b) => a.d - b.d);
+    if (lots.length === 0) return false;
+
+    // Fenêtre : 3 ans maximum pour ne pas exploser localStorage
+    const cutoff = Date.now() - 3 * 365 * 864e5;
+    const startTs = Math.max(lots[0].d.getTime(), cutoff);
+
+    const newHistory = [];
+    let cumQty = 0, cumInvested = 0, lotIdx = 0;
+    let lastWeekKey = null;
+
+    for (const pt of series) {
+        if (pt.date < startTs) continue;
+
+        // Applique tous les lots antérieurs ou égaux à cette date
+        while (lotIdx < lots.length && lots[lotIdx].d.getTime() <= pt.date) {
+            cumQty += lots[lotIdx].q;
+            cumInvested += lots[lotIdx].q * lots[lotIdx].p + lots[lotIdx].f;
+            lotIdx++;
+        }
+        if (cumQty <= 0) continue;
+
+        // Échantillonne 1 point par semaine (clé : année + n° de semaine)
+        const dd = new Date(pt.date);
+        const weekKey = dd.getFullYear() + '-W' + Math.floor((dd - new Date(dd.getFullYear(), 0, 1)) / 6048e5);
+
+        if (weekKey !== lastWeekKey) {
+            newHistory.push({
+                date: dd.toLocaleDateString('fr-FR'),
+                value: cumQty * pt.price,
+                invested: cumInvested
+            });
+            lastWeekKey = weekKey;
+        }
+    }
+
+    // Point final "aujourd'hui" (valeur réelle actuelle)
+    if (cumQty > 0) {
+        newHistory.push({
+            date: new Date().toLocaleDateString('fr-FR'),
+            value: asset.value,
+            invested: cumInvested
+        });
+    }
+
+    if (newHistory.length >= 2) {
+        asset.history = newHistory;
+        return true;
+    }
+    return false;
+}
+
+// Applique rebuildHistoryFromRealPrices() à tous les actifs éligibles.
+// Retourne le nombre d'historiques reconstruits.
+function rebuildAllHistoriesFromRealPrices() {
+    if (!assets || !assets.length) return 0;
+    if (!realSeriesCache || Object.keys(realSeriesCache).length === 0) return 0;
+
+    let count = 0;
+    assets.forEach(a => {
+        try {
+            if (rebuildHistoryFromRealPrices(a)) count++;
+        } catch (err) {
+            console.warn(`[History] Échec pour ${a.name} :`, err.message);
+        }
+    });
+    return count;
+}
+
+// Expose l'API globalement
+window.rebuildHistoryFromRealPrices     = rebuildHistoryFromRealPrices;
+window.rebuildAllHistoriesFromRealPrices = rebuildAllHistoriesFromRealPrices;
 
 // ---------------------------------------------------------------------
 // Volatilité annualisée à partir d'une série de prix quotidienne
