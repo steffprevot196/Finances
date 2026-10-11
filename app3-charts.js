@@ -6,6 +6,12 @@
 // ---------------------------------------------------------------------
 // Configuration commune des graphiques d'évolution (Investi + Valeur + %)
 // ---------------------------------------------------------------------
+// v2 (2026) — Améliorations visuelles :
+//   • Ligne "Investi" en POINTILLÉS pour ne plus être confondue avec "Valeur"
+//   • Ligne "Valeur" plus épaisse (borderWidth 2.5) pour rester visible même
+//     quand elle se superpose à "Investi" (cas d'une performance de 0 %)
+//   • Ordre de dessin : Investi (fond) → Valeur (dessus) → Performance %
+// ---------------------------------------------------------------------
 function buildHistoryChartConfig(tl, valueColor, valueBg) {
     const percentSeries = tl.investedSeries.map((inv, i) =>
         inv > 0 ? Math.round(((tl.valueSeries[i] - inv) / inv) * 1000) / 10 : 0
@@ -15,9 +21,38 @@ function buildHistoryChartConfig(tl, valueColor, valueBg) {
         data: {
             labels: tl.labels,
             datasets: [
-                { label: 'Investi', data: tl.investedSeries, borderColor: '#6b7280', backgroundColor: 'rgba(107,114,128,0.1)', tension: 0.3, fill: true, yAxisID: 'y' },
-                { label: 'Valeur', data: tl.valueSeries, borderColor: valueColor, backgroundColor: valueBg, tension: 0.3, fill: true, yAxisID: 'y' },
-                { label: 'Performance %', data: percentSeries, borderColor: '#f59e0b', backgroundColor: 'transparent', borderDash: [4, 4], tension: 0.3, fill: false, pointRadius: 2, yAxisID: 'yPercent' }
+                {
+                    label: 'Investi',
+                    data: tl.investedSeries,
+                    borderColor: '#6b7280',
+                    backgroundColor: 'rgba(107,114,128,0.08)',
+                    borderWidth: 1.5,
+                    borderDash: [5, 4],          // pointillés
+                    tension: 0.3,
+                    fill: true,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Valeur',
+                    data: tl.valueSeries,
+                    borderColor: valueColor,
+                    backgroundColor: valueBg,
+                    borderWidth: 2.5,            // plus épais
+                    tension: 0.3,
+                    fill: true,
+                    yAxisID: 'y'
+                },
+                {
+                    label: 'Performance %',
+                    data: percentSeries,
+                    borderColor: '#f59e0b',
+                    backgroundColor: 'transparent',
+                    borderDash: [4, 4],
+                    tension: 0.3,
+                    fill: false,
+                    pointRadius: 2,
+                    yAxisID: 'yPercent'
+                }
             ]
         },
         options: {

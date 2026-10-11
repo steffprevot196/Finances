@@ -2266,6 +2266,7 @@ function filterTimelineByRange(tl, range) {
     }
     endDate = Math.min(endDate, now);
 
+    // Trouve le dernier point ANTÉRIEUR au début de la plage
     let startInvested = 0, startValue = 0, hasPriorPoint = false;
     for (let i = 0; i < tl.rawDates.length; i++) {
         if (tl.rawDates[i] <= startDate) {
@@ -2275,10 +2276,12 @@ function filterTimelineByRange(tl, range) {
         } else break;
     }
 
+    // Points DANS la plage
     const inRangeIdx = tl.rawDates.map((d, i) => i).filter(i => tl.rawDates[i] > startDate && tl.rawDates[i] <= endDate);
 
     const labels = [], investedSeries = [], valueSeries = [], rawDates = [];
 
+    // Point d'entrée (1er du graphe)
     if (hasPriorPoint || inRangeIdx.length > 0) {
         labels.push(new Date(startDate).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }));
         investedSeries.push(startInvested);
@@ -2286,6 +2289,7 @@ function filterTimelineByRange(tl, range) {
         rawDates.push(startDate);
     }
 
+    // Points intermédiaires
     inRangeIdx.forEach(i => {
         labels.push(tl.labels[i]);
         investedSeries.push(tl.investedSeries[i]);
@@ -2293,12 +2297,33 @@ function filterTimelineByRange(tl, range) {
         rawDates.push(tl.rawDates[i]);
     });
 
-    if (inRangeIdx.length === 0 && hasPriorPoint) {
-        const closeDate = endDate;
-        labels.push(new Date(closeDate).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }));
-        investedSeries.push(startInvested);
-        valueSeries.push(startValue);
-        rawDates.push(closeDate);
+    // ✅ FIX 2026 : Point de fermeture SYSTÉMATIQUE à la fin de la plage.
+    // Avant, la courbe s'arrêtait net au dernier point connu (ex: mars 2025
+    // pour un filtre "Année 2025" alors qu'on est en 2026). Désormais, si
+    // la fin de plage est > 1 jour après le dernier point, on ajoute un
+    // point qui "prolonge" le dernier état connu — la courbe couvre donc
+    // TOUTE la période sélectionnée.
+    const lastPointTs = rawDates.length > 0 ? rawDates[rawDates.length - 1] : startDate;
+    const daysSinceLastPoint = (endDate - lastPointTs) / 864e5;
+
+    if (daysSinceLastPoint > 1) {
+        let closeInvested, closeValue;
+        if (inRangeIdx.length > 0) {
+            const lastIdx = inRangeIdx[inRangeIdx.length - 1];
+            closeInvested = tl.investedSeries[lastIdx];
+            closeValue = tl.valueSeries[lastIdx];
+        } else if (hasPriorPoint) {
+            closeInvested = startInvested;
+            closeValue = startValue;
+        } else {
+            closeInvested = 0;
+            closeValue = 0;
+        }
+
+        labels.push(new Date(endDate).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }));
+        investedSeries.push(closeInvested);
+        valueSeries.push(closeValue);
+        rawDates.push(endDate);
     }
 
     return { labels, investedSeries, valueSeries, rawDates };
