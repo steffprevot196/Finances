@@ -31,6 +31,7 @@ const APP_SHELL = [
     './',
     './index.html',
     './style.css',
+    './tailwind-config.js',
     './manifest.json',
     './icon.svg',
 

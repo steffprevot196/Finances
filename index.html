@@ -49,7 +49,7 @@
                                https://oauth2.googleapis.com
                                https://api.twelvedata.com
                                https://api.allorigins.win
-                               https://corsproxy.io;
+                               https://corsproxy.io
                                https://query1.finance.yahoo.com;
                    img-src 'self' data:;
                    style-src 'self' 'unsafe-inline'
@@ -84,25 +84,8 @@
 
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        darkBg: '#0b0f19',
-                        cardBg: '#111827',
-                        cardBorder: '#1f2937',
-                        accentGreen: '#10b981',
-                        accentBlue: '#3b82f6',
-                        accentPurple: '#8b5cf6',
-                        accentAmber: '#f59e0b',
-                        accentRed: '#ef4444'
-                    }
-                }
-            }
-        }
-    </script>
+    <!-- Configuration Tailwind externalisée (Chantier CSP 2026) -->
+    <script src="tailwind-config.js"></script>
     <!-- FontAwesome icons (version épinglée, SRI désactivé) -->
     <link rel="stylesheet"
           href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
@@ -270,6 +253,9 @@
                 <input type="checkbox" id="paper-include-stats" onchange="setPaperIncludeInStats(this.checked)" class="accent-purple-500">
                 Inclure dans les stats
             </label>
+            <button onclick="promoteAllPaperAssets()" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-800/50 text-emerald-300 hover:bg-emerald-900/70 text-[11px] font-medium transition flex items-center gap-1.5" title="Convertir TOUTES les positions papier en positions réelles (ne modifie pas les calculs, juste le statut)">
+                <i class="fa-solid fa-arrow-up-right-dots text-[10px]"></i> Promouvoir tout en réel
+            </button>
             <button onclick="deleteAllPaperAssets()" class="px-3 py-1.5 rounded-lg bg-rose-950/60 border border-rose-800/50 text-rose-300 hover:bg-rose-900/70 text-[11px] font-medium transition flex items-center gap-1.5" title="Supprimer toutes les positions papier (tous scénarios confondus)">
                 <i class="fa-solid fa-trash-can text-[10px]"></i> Purger tout
             </button>

@@ -2089,11 +2089,14 @@ function buildPortfolioTimeline(assetList) {
         valueSeries.push(Math.round(totalValue * 100) / 100);
     });
 
-    // --- 5) Auto-diagnostic : si le pic dépasse 2× le total investi actuel,
-    //         on log un warning avec le top 5 des actifs (utile en console).
+    // --- 5) Auto-diagnostic (désactivé en mode paper ou si option d'inclusion) ---
+    // On ne log le warning QUE si le pic est suspect ET que les actifs ne sont
+    // pas tous marqués comme papier (sinon c'est du bruit inutile).
+    const realAssetCount = list.filter(a => !isPaperAsset(a)).length;
+    const hasRealAssets = realAssetCount > 0;
     const currentTotalInv = list.reduce((s, a) => s + (a.invested || 0), 0);
     const maxInv = Math.max(0, ...investedSeries);
-    if (currentTotalInv > 0 && maxInv > currentTotalInv * 2) {
+    if (hasRealAssets && currentTotalInv > 0 && maxInv > currentTotalInv * 2) {
         console.warn(
             `[Timeline] Anomalie détectée : pic investi (${maxInv.toFixed(0)} €) ` +
             `supérieur à 2× le total actuel (${currentTotalInv.toFixed(0)} €). ` +
@@ -2111,22 +2114,45 @@ function buildPortfolioTimeline(assetList) {
 //   • trie par invested décroissant
 //   • affiche les 10 premiers avec leur poids % dans le total
 //   • signale les actifs dont l'invested > 30 % du total (suspects)
+//   • distingue actifs réels et actifs papier
 // =====================================================================
 function debugPortfolioData() {
     console.log('%c=== Diagnostic Patrimonial ===', 'color:#8b5cf6;font-weight:bold;font-size:13px;');
-    const real = assets.filter(a => !isPaperAsset(a));
-    const sorted = [...real].sort((a, b) => (b.invested || 0) - (a.invested || 0));
-    const totalInv = sorted.reduce((s, a) => s + (a.invested || 0), 0);
-    const totalVal = sorted.reduce((s, a) => s + (a.value || 0), 0);
 
-    console.log(`Actifs réels      : ${real.length}`);
-    console.log(`Actifs papier     : ${assets.length - real.length}`);
-    console.log(`Total investi     : ${formatEUR(totalInv)}`);
-    console.log(`Total valeur      : ${formatEUR(totalVal)}`);
-    console.log(`P&L latent        : ${formatEUR(totalVal - totalInv)}`);
+    const real = assets.filter(a => !isPaperAsset(a));
+    const paper = assets.filter(a => isPaperAsset(a));
+
+    // Stats globales
+    const realInv = real.reduce((s, a) => s + (a.invested || 0), 0);
+    const realVal = real.reduce((s, a) => s + (a.value || 0), 0);
+    const paperInv = paper.reduce((s, a) => s + (a.invested || 0), 0);
+    const paperVal = paper.reduce((s, a) => s + (a.value || 0), 0);
+
+    console.log(`Actifs réels      : ${real.length}  (investi ${formatEUR(realInv)} · valeur ${formatEUR(realVal)})`);
+    console.log(`Actifs papier     : ${paper.length}  (investi ${formatEUR(paperInv)} · valeur ${formatEUR(paperVal)})`);
+    console.log(`Total investi     : ${formatEUR(realInv + paperInv)}`);
+    console.log(`Total valeur      : ${formatEUR(realVal + paperVal)}`);
+    console.log(`P&L latent (réel) : ${formatEUR(realVal - realInv)}`);
     console.log('');
 
-    console.log('%cTop 10 actifs par montant investi :', 'color:#06b6d4;font-weight:bold;');
+    // Alerte si TOUS les actifs sont papier
+    if (real.length === 0 && paper.length > 0) {
+        console.warn(
+            '%c⚠️ TOUS vos actifs sont marqués comme "papier" (mode Paper Trading).\n' +
+            'Pour les convertir en positions réelles, cliquez sur le bouton\n' +
+            '"Promouvoir tout en réel" dans le bandeau violet en haut de l\'app,\n' +
+            'ou tapez : promoteAllPaperAssets()',
+            'color:#f59e0b;font-weight:bold;font-size:12px;line-height:1.6;'
+        );
+    }
+
+    // Top 10 par invested (réels d'abord, puis papier si aucun réel)
+    const displayList = real.length > 0 ? real : paper;
+    const displayLabel = real.length > 0 ? 'réels' : 'papier (⚠️ aucun réel)';
+    const sorted = [...displayList].sort((a, b) => (b.invested || 0) - (a.invested || 0));
+    const totalInv = sorted.reduce((s, a) => s + (a.invested || 0), 0);
+
+    console.log(`%cTop 10 actifs ${displayLabel} par montant investi :`, 'color:#06b6d4;font-weight:bold;');
     console.table(sorted.slice(0, 10).map(a => {
         const firstAcq = _getFirstAcquisitionDate(a);
         return {
@@ -2141,8 +2167,65 @@ function debugPortfolioData() {
         };
     }));
 
-    return { totalInv, totalVal, count: real.length };
+    return {
+        realCount: real.length,
+        paperCount: paper.length,
+        realInvested: realInv,
+        realValue: realVal,
+        paperInvested: paperInv,
+        paperValue: paperVal
+    };
 }
+
+// =====================================================================
+// PROMOTION MASSIVE — promouvoir TOUS les actifs papier en réel
+// ---------------------------------------------------------------------
+// Utilisé quand l'utilisateur réalise qu'il a créé ses actifs pendant
+// que le mode Paper Trading était actif (ce qui les a marqués isPaper).
+// Retire le flag `isPaper` et `paperScenarioId` de tous les actifs.
+//
+// ⚠ Aucune modification de valeur/invested : seul le statut change.
+// =====================================================================
+function promoteAllPaperAssets() {
+    const paperAssets = assets.filter(a => isPaperAsset(a));
+    if (!paperAssets.length) {
+        if (typeof toastInfo === 'function') {
+            toastInfo('Aucun actif à promouvoir', 'Tous vos actifs sont déjà réels.');
+        }
+        return;
+    }
+
+    const totalValue = paperAssets.reduce((s, a) => s + (a.value || 0), 0);
+    if (!confirm(
+        `Promouvoir ${paperAssets.length} actif(s) papier en positions réelles ?\n\n` +
+        `Valeur totale concernée : ${formatEUR(totalValue)}\n\n` +
+        `Effets :\n` +
+        `• Les actifs seront comptés comme positions réelles\n` +
+        `• Le mode Paper Trading pourra être désactivé proprement\n` +
+        `• Aucun montant n'est modifié (juste le statut)\n\n` +
+        `Réversible via Ctrl+Z.`
+    )) return;
+
+    if (typeof pushUndo === 'function') pushUndo('Promotion massive des actifs papier');
+
+    paperAssets.forEach(a => {
+        delete a.isPaper;
+        delete a.paperScenarioId;
+    });
+
+    saveToStorage();
+    if (typeof refreshAllUI === 'function') refreshAllUI();
+
+    if (typeof toastSuccess === 'function') {
+        toastSuccess(
+            'Actifs promus en réel',
+            `${paperAssets.length} position(s) sont désormais réelles.`
+        );
+    }
+}
+
+// Expose l'API globalement
+window.promoteAllPaperAssets = promoteAllPaperAssets;
 
 function filterTimelineByRange(tl, range) {
     if (!range || range === 'ALL') return tl;

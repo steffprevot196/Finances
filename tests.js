@@ -1339,29 +1339,50 @@ _suite('_enrichSnapshotsWithVariations');
     assertEq(enriched[enriched.length - 1].month, '2024-01', '_enrichSnapshotsWithVariations : 2024-01 en queue');
 
     // Cas MoM : 2025-02 vs 2025-01 (12500 - 12000 = +500)
+    // ⚠ Test robuste : vérifie d'abord que feb et feb.mom existent
     const feb = enriched.find(s => s.month === '2025-02');
-    assertTrue(feb.mom !== null, '_enrichSnapshotsWithVariations : 2025-02 a un MoM');
-    assertEq(feb.mom.deltaEUR, 500, '_enrichSnapshotsWithVariations : MoM 2025-02 = +500 €');
-    assertApprox(feb.mom.deltaPct, 4.17, 0.01, '_enrichSnapshotsWithVariations : MoM % 2025-02 ≈ +4,17 %');
+    assertTrue(feb !== undefined, '_enrichSnapshotsWithVariations : snapshot 2025-02 trouvé');
+    if (feb && feb.mom) {
+        assertEq(feb.mom.deltaEUR, 500, '_enrichSnapshotsWithVariations : MoM 2025-02 = +500 €');
+        assertApprox(feb.mom.deltaPct, 4.17, 0.01, '_enrichSnapshotsWithVariations : MoM % 2025-02 ≈ +4,17 %');
+    } else {
+        _assert(false, '_enrichSnapshotsWithVariations : 2025-02 doit avoir un MoM',
+            'moM est null — la liste ne contient probablement pas assez de snapshots');
+    }
 
     // Cas MoM négatif : 2025-03 vs 2025-02 (11800 - 12500 = -700)
     const mar = enriched.find(s => s.month === '2025-03');
-    assertEq(mar.mom.deltaEUR, -700, '_enrichSnapshotsWithVariations : MoM 2025-03 = -700 €');
-    assertTrue(mar.mom.deltaPct < 0, '_enrichSnapshotsWithVariations : MoM % 2025-03 négatif');
+    assertTrue(mar !== undefined, '_enrichSnapshotsWithVariations : snapshot 2025-03 trouvé');
+    if (mar && mar.mom) {
+        assertEq(mar.mom.deltaEUR, -700, '_enrichSnapshotsWithVariations : MoM 2025-03 = -700 €');
+        assertTrue(mar.mom.deltaPct < 0, '_enrichSnapshotsWithVariations : MoM % 2025-03 négatif');
+    } else {
+        _assert(false, '_enrichSnapshotsWithVariations : 2025-03 doit avoir un MoM', 'moM est null');
+    }
 
     // Cas MoM null : le premier snapshot (2024-01) n'a pas de MoM
     const jan24 = enriched.find(s => s.month === '2024-01');
-    assertNull(jan24.mom, '_enrichSnapshotsWithVariations : 2024-01 n\'a pas de MoM (premier)');
+    assertTrue(jan24 !== undefined, '_enrichSnapshotsWithVariations : snapshot 2024-01 trouvé');
+    if (jan24) {
+        assertNull(jan24.mom, '_enrichSnapshotsWithVariations : 2024-01 n\'a pas de MoM (premier)');
+    }
 
-    // Cas YoY : 2025-01 vs 2024-01 (12000 - 10000 = +2000) → index 1 de la liste triée ascendante → 12 rangs plus tôt
+    // Cas YoY : 2025-01 vs 2024-01 (12000 - 10000 = +2000)
     const jan25 = enriched.find(s => s.month === '2025-01');
-    assertTrue(jan25.yoy !== null, '_enrichSnapshotsWithVariations : 2025-01 a un YoY');
-    assertEq(jan25.yoy.deltaEUR, 2000, '_enrichSnapshotsWithVariations : YoY 2025-01 = +2000 €');
-    assertApprox(jan25.yoy.deltaPct, 20.00, 0.01, '_enrichSnapshotsWithVariations : YoY % 2025-01 = +20 %');
+    assertTrue(jan25 !== undefined, '_enrichSnapshotsWithVariations : snapshot 2025-01 trouvé');
+    if (jan25 && jan25.yoy) {
+        assertEq(jan25.yoy.deltaEUR, 2000, '_enrichSnapshotsWithVariations : YoY 2025-01 = +2000 €');
+        assertApprox(jan25.yoy.deltaPct, 20.00, 0.01, '_enrichSnapshotsWithVariations : YoY % 2025-01 = +20 %');
+    } else {
+        _assert(false, '_enrichSnapshotsWithVariations : 2025-01 doit avoir un YoY', 'yoY est null');
+    }
 
     // Cas YoY null : 2024-12 (pas de 2023-12)
     const dec24 = enriched.find(s => s.month === '2024-12');
-    assertNull(dec24.yoy, '_enrichSnapshotsWithVariations : 2024-12 n\'a pas de YoY');
+    assertTrue(dec24 !== undefined, '_enrichSnapshotsWithVariations : snapshot 2024-12 trouvé');
+    if (dec24) {
+        assertNull(dec24.yoy, '_enrichSnapshotsWithVariations : 2024-12 n\'a pas de YoY');
+    }
 
     // Restaure
     localStorage.removeItem(MONTHLY_SNAPSHOTS_KEY);
