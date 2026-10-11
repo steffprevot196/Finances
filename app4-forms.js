@@ -82,6 +82,20 @@ function updateAssetFormSections(desiredEnvelope) {
     const manual = tags.some(t => MANUAL_VALUATION_TAGS.includes(t));
     document.getElementById('add-valuation-wrap').classList.toggle('hidden', !manual);
 
+    // === Champ "Coût total d'acquisition" : crypto non-ETF uniquement ===
+    // Un ETF-Crypto (rare mais possible via les tags) ne déclenche pas ce
+    // champ : on ne veut pas dupliquer l'UX "ETF" classique avec prix unitaire.
+    const isCryptoNonEtf = tags.includes('Crypto') && !tags.includes('ETF');
+    const totalWrap = document.getElementById('add-total-cost-wrap');
+    if (totalWrap) {
+        totalWrap.classList.toggle('hidden', !isCryptoNonEtf);
+        if (isCryptoNonEtf) {
+            // Différé léger pour laisser le navigateur finir le toggle DOM
+            // avant de lire qty / price (évite un calcul sur valeurs vides).
+            setTimeout(recalculateTotalCost, 0);
+        }
+    }
+
     const opts = envelopeOptionsFor(tags);
     const sel  = document.getElementById('add-envelope');
     const previous = desiredEnvelope !== undefined ? desiredEnvelope : sel.value;
@@ -137,6 +151,9 @@ function openAddAssetModal() {
     _addValueTouched = false;
     document.getElementById('add-purchase-date').value = new Date().toISOString().slice(0, 10);
     document.getElementById('add-qty').value = 1;
+    // Reset du champ "Coût total" (visible uniquement pour crypto non-ETF)
+    const _totalCostInput = document.getElementById('add-total-cost');
+    if (_totalCostInput) _totalCostInput.value = '';
     setBrokerValue('');
     document.getElementById('add-bond-coupon').value = '';
     document.getElementById('add-bond-maturity').value = '';
@@ -227,6 +244,8 @@ function openEditAssetModal(id) {
     document.getElementById('modal-add-asset-submit-btn').innerText = 'Enregistrer les Modifications';
     document.getElementById('search-results-container').classList.add('hidden');
     document.getElementById('add-search-input').value = '';
+    // Force le recalcul du coût total après restauration des valeurs
+    if (typeof recalculateTotalCost === 'function') recalculateTotalCost();
     document.getElementById('modal-add-asset').classList.remove('hidden');
 }
 
@@ -282,12 +301,70 @@ function updateEsgPreview() {
 // intentionnellement par l'utilisateur (y compris 0).
 // ---------------------------------------------------------------------
 function recalculateAddTotals() {
+    // Recalcule le coût total d'acquisition (toujours, si le bloc est visible)
+    if (typeof recalculateTotalCost === 'function') recalculateTotalCost();
+
+    // Recalcule la valeur unitaire (seulement si non touchée manuellement)
     if (_addValueTouched) return;
     const price = parseFloat(document.getElementById('add-price').value) || 0;
     const valueInput = document.getElementById('add-value');
     if (valueInput && !valueInput.value) {
         valueInput.value = price.toFixed(4);
     }
+}
+
+// ---------------------------------------------------------------------
+// COÛT TOTAL D'ACQUISITION — spécifique aux cryptos non-ETF
+// ---------------------------------------------------------------------
+// Ce champ permet de saisir directement le montant investi (ex: « j'ai
+// acheté pour 500 € de BTC avec 3 € de frais ») plutôt que le PRU unitaire.
+// Le back-calcul suit la formule fiscale française :
+//     PRU unitaire = (coût total − frais) / quantité
+// Ce qui garantit que `invested = qty × PRU + frais` reste cohérent.
+// ---------------------------------------------------------------------
+
+// Recalcule le champ "Coût total" à partir de qty × PRU + frais.
+// Ne fait rien si le bloc est masqué (asset non crypto) ou si les valeurs
+// de base sont insuffisantes (évite d'afficher "0.00" sur un formulaire vide).
+function recalculateTotalCost() {
+    const wrap = document.getElementById('add-total-cost-wrap');
+    if (!wrap || wrap.classList.contains('hidden')) return;
+
+    const input = document.getElementById('add-total-cost');
+    if (!input) return;
+
+    const qty   = parseFloat(document.getElementById('add-qty').value)   || 0;
+    const price = parseFloat(document.getElementById('add-price').value) || 0;
+    const frais = parseFloat(document.getElementById('add-frais').value) || 0;
+
+    // Garde-fou : tant que quantité et PRU ne sont pas renseignés, on
+    // n'écrase pas un éventuel "0.00" saisi manuellement.
+    if (qty <= 0 || price <= 0) return;
+
+    input.value = (qty * price + frais).toFixed(2);
+}
+
+// Appelé quand l'utilisateur modifie directement le champ Coût total :
+// on back-calcule le PRU unitaire pour que `invested = qty × PRU + frais`
+// corresponde exactement au montant saisi.
+function onTotalCostInput() {
+    const input = document.getElementById('add-total-cost');
+    if (!input) return;
+
+    const total = parseFloat(input.value);
+    if (!Number.isFinite(total) || total < 0) return;
+
+    const qty = parseFloat(document.getElementById('add-qty').value) || 0;
+    if (qty <= 0) return;
+
+    const frais = parseFloat(document.getElementById('add-frais').value) || 0;
+    const price = (total - frais) / qty;
+
+    // Frais > coût total : situation incohérente, on n'écrase pas le PRU
+    if (price < 0) return;
+
+    const priceInput = document.getElementById('add-price');
+    if (priceInput) priceInput.value = price.toFixed(6);
 }
 
 // ---------------------------------------------------------------------

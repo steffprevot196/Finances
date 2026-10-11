@@ -4446,6 +4446,22 @@
                             <input type="number" step="any" id="add-price" required placeholder="135.00" oninput="recalculateAddTotals()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500 font-mono">
                         </div>
                     </div>
+
+                    <!-- === COÛT TOTAL D'ACQUISITION (crypto non-ETF uniquement) === -->
+                    <div id="add-total-cost-wrap" class="hidden bg-emerald-950/20 border border-emerald-800/40 rounded-lg p-3">
+                        <label class="block text-emerald-300 mb-1 text-[11px] font-bold uppercase tracking-wide">
+                            <i class="fa-solid fa-coins text-[10px] mr-1"></i>
+                            Coût total d'acquisition (€)
+                        </label>
+                        <input type="number" step="any" id="add-total-cost"
+                               placeholder="ex: 500.00"
+                               oninput="onTotalCostInput()"
+                               class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white font-mono focus:outline-none focus:border-emerald-500">
+                        <p class="text-[10px] text-gray-400 mt-1.5 leading-relaxed">
+                            Calculé automatiquement : <b>(Quantité × PRU) + Frais</b>.
+                            Modifiez cette valeur pour recalculer le PRU à partir du coût total réel (utile si vous connaissez le montant investi en € plutôt que le prix unitaire).
+                        </p>
+                    </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-gray-400 mb-1">Date d'Achat *</label>
@@ -4514,7 +4530,7 @@
                         </div>
                         <div>
                             <label class="block text-gray-400 mb-1">Frais d'Achat Total (€)</label>
-                            <input type="number" step="any" id="add-frais" value="0" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500 font-mono">
+                            <input type="number" step="any" id="add-frais" value="0" oninput="recalculateTotalCost()" class="w-full bg-gray-950 border border-gray-800 rounded-lg p-2 text-white focus:outline-none focus:border-emerald-500 font-mono">
                         </div>
                     </div>
 
