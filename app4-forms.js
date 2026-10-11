@@ -963,18 +963,65 @@ function openSellAssetModal() {
     document.getElementById('modal-sell-asset').classList.remove('hidden');
 }
 
+// ---------------------------------------------------------------------
+// DÉTECTION DE LA DATE D'ACQUISITION LA PLUS ANCIENNE
+// ---------------------------------------------------------------------
+// Un actif peut avoir sa date d'origine dans TROIS endroits différents :
+//   • `purchaseDate` : ISO YYYY-MM-DD (saisie au formulaire)
+//   • `buys[].date`  : format FR DD/MM/YYYY (achats successifs)
+//   • `lots[].date`  : ISO YYYY-MM-DD (pièces AuCoffre, imports, migration)
+//
+// On prend le MINIMUM de toutes les sources trouvées. C'est indispensable
+// car :
+//   • `buys` n'est pas toujours trié chronologiquement (imports CSV)
+//   • certains actifs n'ont QUE des `lots` (pas de `buys`)
+//   • `purchaseDate` peut refléter la date de création de la ligne plutôt
+//     que la date du premier achat
+function _getEarliestAcquisitionDate(asset) {
+    if (!asset) return null;
+    const candidates = [];
+
+    if (asset.purchaseDate) {
+        const d = parseFlexDate(asset.purchaseDate);
+        if (d) candidates.push(d);
+    }
+    (asset.buys || []).forEach(b => {
+        const d = parseFlexDate(b.date);
+        if (d) candidates.push(d);
+    });
+    (asset.lots || []).forEach(l => {
+        const d = parseFlexDate(l.date);
+        if (d) candidates.push(d);
+    });
+
+    if (!candidates.length) return null;
+    return new Date(Math.min(...candidates.map(d => d.getTime())));
+}
+
 function goToSellStep2() {
     const saleDate = document.getElementById('sell-date-input').value;
     if (!saleDate) { alert('Choisissez une date de vente.'); return; }
     pendingSellDate = saleDate;
     document.getElementById('sell-date-label').innerText = new Date(saleDate).toLocaleDateString('fr-FR');
 
-    const saleTime = new Date(saleDate).getTime();
+    // Comparaison à la granularité du JOUR : on inclut tout actif acheté le
+    // jour même de la vente. Utiliser l'heure exacte provoquerait des
+    // exclusions silencieuses selon le fuseau horaire du navigateur.
+    const saleDayEnd = new Date(saleDate);
+    saleDayEnd.setHours(23, 59, 59, 999);
+    const saleTime = saleDayEnd.getTime();
+
     const eligible = assets.filter(a => {
-        const buyDate = a.purchaseDate
-            ? new Date(a.purchaseDate)
-            : (a.buys && a.buys[0] ? parseFlexDate(a.buys[0].date) : null);
+        const buyDate = _getEarliestAcquisitionDate(a);
         return buyDate && buyDate.getTime() <= saleTime;
+    });
+
+    // Tri par date d'acquisition croissante (le plus ancien en premier)
+    // pour rendre la liste déterministe et facile à scanner.
+    eligible.sort((a, b) => {
+        const da = _getEarliestAcquisitionDate(a);
+        const db = _getEarliestAcquisitionDate(b);
+        return (da ? da.getTime() : 0) - (db ? db.getTime() : 0);
     });
 
     const list = document.getElementById('sell-asset-list');
