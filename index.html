@@ -526,6 +526,59 @@
                 </div>
                 <div id="theses-review-wrap"></div>
             </div>
+
+            <!-- HISTOGRAMME — P&L réalisé & potentiel par année (Ajout 2026) -->
+            <div class="bg-gray-900/60 border border-gray-800 rounded-xl p-5">
+                <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4">
+                    <div>
+                        <h3 class="text-base font-bold text-white flex items-center gap-2">
+                            <i class="fa-solid fa-chart-column text-indigo-400"></i> Performance annuelle
+                        </h3>
+                        <p class="text-xs text-gray-400">
+                            P&amp;L <span class="text-blue-400 font-bold">réalisé</span> (cessions de l'année)
+                            vs P&amp;L <span class="text-purple-400 font-bold">potentiel</span> (positions acquises cette année-là, encore détenues).
+                        </p>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0 text-[11px] text-gray-500">
+                        <span>Basculer :</span>
+                        <div class="flex rounded-lg bg-gray-950 border border-gray-800 p-0.5 text-[10px]">
+                            <button id="annual-pnl-btn-eur" onclick="setAnnualPnlMode('EUR')" class="px-2 py-1 rounded transition bg-indigo-950 text-indigo-300">€</button>
+                            <button id="annual-pnl-btn-pct" onclick="setAnnualPnlMode('PCT')" class="px-2 py-1 rounded transition text-gray-400 hover:text-white">%</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+                    <div class="bg-gray-950 border border-blue-900/40 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">P&amp;L réalisé total</div>
+                        <div class="font-mono font-bold text-white" id="annual-pnl-stat-realized">0,00 €</div>
+                        <div class="text-[9px] text-gray-500" id="annual-pnl-stat-realized-detail">0 cession(s)</div>
+                    </div>
+                    <div class="bg-gray-950 border border-purple-900/40 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">P&amp;L latent total</div>
+                        <div class="font-mono font-bold text-white" id="annual-pnl-stat-latent">0,00 €</div>
+                        <div class="text-[9px] text-gray-500" id="annual-pnl-stat-latent-detail">0 actif(s)</div>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Meilleure année</div>
+                        <div class="font-mono font-bold text-emerald-400" id="annual-pnl-stat-best">—</div>
+                        <div class="text-[9px] text-gray-500" id="annual-pnl-stat-best-year">—</div>
+                    </div>
+                    <div class="bg-gray-950 border border-gray-800 rounded-lg p-2.5">
+                        <div class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Pire année</div>
+                        <div class="font-mono font-bold text-rose-400" id="annual-pnl-stat-worst">—</div>
+                        <div class="text-[9px] text-gray-500" id="annual-pnl-stat-worst-year">—</div>
+                    </div>
+                </div>
+
+                <div class="bg-gray-950 border border-gray-800 rounded-xl p-3 h-72 relative">
+                    <canvas id="annualPnlChart"></canvas>
+                    <div id="annual-pnl-empty" class="hidden absolute inset-0 flex flex-col items-center justify-center text-gray-500 text-xs gap-2">
+                        <i class="fa-solid fa-chart-column text-3xl text-gray-700"></i>
+                        <div>Ajoutez des actifs ou enregistrez des cessions pour voir la performance annuelle.</div>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <!-- TAB 1 : VUE D'ENSEMBLE (graphiques, analyses, scoring) -->

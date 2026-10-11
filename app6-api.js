@@ -127,7 +127,7 @@ function yahooChartUrl(symbol, range) {
 
 // Tente une URL sur tous les proxies disponibles en cascade.
 // Retourne la réponse JSON parsée ou null si tout échoue.
-async function _fetchViaProxy(url, timeoutMs = 8000) {
+async function _fetchViaProxy(url, timeoutMs = 5000) {
     for (const proxy of YAHOO_PROXIES) {
         const proxiedUrl = proxy.prefix + encodeURIComponent(url);
         try {
@@ -615,13 +615,32 @@ async function refreshRealPriceHistory() {
         assets.filter(a => hasTag(a, 'Crypto') && CRYPTO_COINGECKO_IDS[a.ticker.toUpperCase()])
               .map(a => a.ticker.toUpperCase())
     )];
-    for (const ticker of cryptoTickers) {
-        try {
-            const series = await fetchCoinGeckoHistory(CRYPTO_COINGECKO_IDS[ticker]);
-            await priceDBSet('CRYPTO_' + ticker, { updatedAt: Date.now(), series });
-            done++;
-        } catch (err) { failed.push(ticker + ' (' + err.message + ')'); }
-    }
+
+    // Parallélisation 2 workers + retry + pause 1,5 s entre appels
+    // (CoinGecko free tier : 10-30 req/min → les gros portefeuilles
+    //  déclenchaient des 429 en série avec le loop séquentiel nu).
+    const cryptoQueue = cryptoTickers.slice();
+    const cryptoWorkers = Array.from({ length: Math.min(2, cryptoQueue.length) }, async () => {
+        while (cryptoQueue.length) {
+            const ticker = cryptoQueue.shift();
+            try {
+                const series = await _fetchWithRetry(
+                    `https://api.coingecko.com/api/v3/coins/${CRYPTO_COINGECKO_IDS[ticker]}/market_chart?vs_currency=eur&days=365&interval=daily`,
+                    {},
+                    4
+                ).then(r => r.json())
+                 .then(d => (d.prices || []).map(([ts, price]) => ({ date: ts, price })));
+
+                if (series.length < 30) throw new Error(`données insuffisantes (${series.length} points)`);
+                await priceDBSet('CRYPTO_' + ticker, { updatedAt: Date.now(), series });
+                done++;
+            } catch (err) {
+                failed.push(ticker + ' (' + err.message + ')');
+            }
+            if (cryptoQueue.length) await new Promise(r => setTimeout(r, 1500));
+        }
+    });
+    await Promise.all(cryptoWorkers);
 
     const currencyTickers = [...new Set(
         assets.filter(a => hasTag(a, 'Devises/Liquidités') && CASH_CURRENCY_TICKERS.includes(a.ticker.toUpperCase()))
@@ -807,6 +826,32 @@ function primeRealVolCache() {
 // Verrou global : empêche deux actualisations concurrentes (source du 429)
 let _priceFetchInProgress = false;
 
+// Retry avec backoff exponentiel sur les fetch échoués (429, réseau).
+// Utilisé pour amortir les rate-limits CoinGecko / Frankfurter.
+async function _fetchWithRetry(url, options = {}, maxRetries = 3) {
+    let lastErr = null;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        try {
+            const res = await fetch(url, options);
+            if (res.status === 429) {
+                const waitMs = Math.pow(2, attempt) * 2000 + Math.random() * 1000;
+                console.warn(`[Fetch] 429 rate-limited, retry dans ${Math.round(waitMs)}ms`);
+                await new Promise(r => setTimeout(r, waitMs));
+                continue;
+            }
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res;
+        } catch (err) {
+            lastErr = err;
+            if (attempt < maxRetries - 1) {
+                const waitMs = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+                await new Promise(r => setTimeout(r, waitMs));
+            }
+        }
+    }
+    throw lastErr || new Error('Fetch failed after retries');
+}
+
 async function fetchLivePrices() {
     if (_priceFetchInProgress) {
         console.warn('[Prices] Actualisation déjà en cours — ignorée.');
@@ -819,7 +864,6 @@ async function fetchLivePrices() {
     if (icon) icon.classList.add('fa-spin');
     if (btn)  btn.disabled = true;
 
-    // Skeleton immédiat sur les 2 tables principales pendant les fetch
     const invBackup = showSkeletonFor('#table-inventory-body', 6, 13);
     const cryptoBackup = showSkeletonFor('#table-crypto-body', 3, 7);
 
@@ -828,14 +872,17 @@ async function fetchLivePrices() {
     let updated = 0;
     const sourceErrors = [];
 
-    // --- Crypto (CoinGecko) ---
+    // --- Crypto (CoinGecko, avec retry) ---
     try {
         const cryptoAssets = assets.filter(a => hasTag(a, 'Crypto') && cryptoMap[a.ticker.toUpperCase()]);
         if (cryptoAssets.length) {
             try {
                 const ids = [...new Set(cryptoAssets.map(a => cryptoMap[a.ticker.toUpperCase()]))].join(',');
-                const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=eur`);
-                if (!res.ok) throw new Error(`réponse HTTP ${res.status}`);
+                const res = await _fetchWithRetry(
+                    `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=eur`,
+                    {},
+                    3
+                );
                 const prices = await res.json();
                 cryptoAssets.forEach(a => {
                     const priceEUR = prices[cryptoMap[a.ticker.toUpperCase()]]?.eur;
@@ -846,19 +893,22 @@ async function fetchLivePrices() {
                     }
                 });
             } catch (err) {
-                sourceErrors.push(`Cryptomonnaies (CoinGecko) : ${err.message}`);
+                sourceErrors.push(`Crypto (CoinGecko) : ${err.message}`);
             }
         }
     } catch (err) { console.warn(err); }
 
-    // --- Devises (Frankfurter/BCE) ---
+    // --- Devises (Frankfurter, avec retry) ---
     try {
         const currencyAssets = assets.filter(a => hasTag(a, 'Devises/Liquidités') && currencyTickers.includes(a.ticker.toUpperCase()));
         if (currencyAssets.length) {
             try {
                 const to = [...new Set(currencyAssets.map(a => a.ticker.toUpperCase()))].join(',');
-                const res = await fetch(`https://api.frankfurter.dev/v1/latest?base=EUR&symbols=${to}`);
-                if (!res.ok) throw new Error(`réponse HTTP ${res.status}`);
+                const res = await _fetchWithRetry(
+                    `https://api.frankfurter.dev/v1/latest?base=EUR&symbols=${to}`,
+                    {},
+                    3
+                );
                 const data = await res.json();
                 currencyAssets.forEach(a => {
                     const rate = data.rates?.[a.ticker.toUpperCase()];
@@ -874,147 +924,151 @@ async function fetchLivePrices() {
         }
     } catch (err) { console.warn(err); }
 
-    // --- Actions / ETF : cascade Twelve Data → Finnhub → Yahoo ---
-    // Twelve Data est la source principale (CORS natif, pas de proxy instable).
-    // Finnhub couvre uniquement les US. Yahoo reste en fallback ultime.
+    // =================================================================
+    // ACTIONS / ETF — Yahoo EN PARALLÈLE (concurrency 3)
+    // -----------------------------------------------------------------
+    // Le loop séquentiel historique prenait 3-4 minutes si Yahoo était
+    // indisponible (2 proxies × 8 s × 14 symboles). On parallélise sur
+    // 3 workers avec un timeout réduit à 5 s par proxy (10 s pire cas).
+    // =================================================================
     const updatedStockIds = new Set();
     const stockAssets = assets.filter(a => (hasTag(a, 'Action') || hasTag(a, 'ETF')) && !hasTag(a, 'Crypto'));
+
     if (stockAssets.length) {
-        let stockUpdated = 0;
+        const showToast = stockAssets.length > 1;
+        if (showToast) showProgressToast('Actualisation Actions / ETF…', `0 / ${stockAssets.length}`, 0);
 
-        // Bandeau de progression — affiché uniquement si Twelve Data est configuré
-        // (c'est le seul cas où la boucle dure vraiment longtemps : 8 s / actif).
-        const showToast = twelveDataApiKey && stockAssets.length > 1;
-        if (showToast) {
-            showProgressToast(
-                'Actualisation des ETF / Actions…',
-                `0 / ${stockAssets.length} · démarrage`,
-                0
-            );
-        }
+        // --- Phase 1 : Yahoo en parallèle (concurrency 3) ---
+        const yahooResults = {};
+        let yahooDone = 0;
 
-        let processed = 0;
-        for (const a of stockAssets) {
-            processed++;
-            const symbol = a.yahooTicker || a.ticker;
-            if (!symbol) continue;
-            let price = null;
-            const sources = [];
+        const queue = stockAssets
+            .map(a => ({ asset: a, symbol: a.yahooTicker || a.ticker }))
+            .filter(x => x.symbol);
 
-            if (showToast) {
-                updateProgressToast(
-                    `${processed} / ${stockAssets.length} · ${symbol}`,
-                    (processed - 1) / stockAssets.length * 100
-                );
-            }
-
-            // Détecte si le symbole est US (pas de suffixe .XX) ou européen
-            // (.PA, .DE, .L, .MU, .AS, .MI, .SW…) — Twelve Data free tier
-            // ne couvre PAS les places européennes, donc on saute directement
-            // à Yahoo pour ces symboles.
-            const isEuropean = /\.[A-Z]{1,3}$/.test(symbol);
-
-            // 1) Yahoo en PREMIER pour les symboles européens (Twelve Data
-            //    ne les couvre pas → inutile de gaspiller un appel API).
-            if (isEuropean) {
+        const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+            while (queue.length) {
+                const item = queue.shift();
                 try {
-                    const p = await fetchYahooQuote(symbol);
-                    if (p) { price = p; sources.push('Yahoo'); }
-                } catch (err) { sources.push(`Yahoo: ${err.message}`); }
-            }
-
-            // 2) Twelve Data (source principale pour les US, back-up pour l'Europe)
-            if (!price && twelveDataApiKey) {
-                try {
-                    price = await fetchTwelveDataQuote(symbol);
-                    if (price) sources.push('Twelve Data');
-                    // 8 requêtes/min en gratuit → 7,5 s minimum entre appels.
-                    // On saute la pause après le DERNIER actif (aucun appel après).
-                    if (processed < stockAssets.length) {
-                        if (showToast) {
-                            updateProgressToast(
-                                `${processed} / ${stockAssets.length} · pause API (8 s)…`,
-                                processed / stockAssets.length * 100
-                            );
-                        }
-                        await new Promise(r => setTimeout(r, 8000));
-                    }
+                    const price = await fetchYahooQuote(item.symbol);
+                    yahooResults[item.symbol] = { price: price || null };
                 } catch (err) {
-                    sources.push(`Twelve Data: ${err.message}`);
+                    yahooResults[item.symbol] = { price: null, error: err.message };
+                }
+                yahooDone++;
+                if (showToast) {
+                    updateProgressToast(
+                        `${yahooDone} / ${stockAssets.length} · Yahoo`,
+                        (yahooDone / stockAssets.length) * 60
+                    );
                 }
             }
+        });
+        await Promise.all(workers);
 
-            // 3) Finnhub (US uniquement, rapide)
-            if (!price && finnhubApiKey) {
-                try {
-                    const p = await fetchFinnhubQuote(symbol);
-                    if (p) { price = p; sources.push('Finnhub'); }
-                } catch (err) { sources.push(`Finnhub: ${err.message}`); }
-            }
-
-            if (price) {
-                a.value = a.qty * price;
+        // Applique les résultats Yahoo réussis
+        stockAssets.forEach(a => {
+            const symbol = a.yahooTicker || a.ticker;
+            if (!symbol) return;
+            const r = yahooResults[symbol];
+            if (r && r.price) {
+                a.value = a.qty * r.price;
                 upsertTodayHistoryPoint(a, a.value, a.invested);
-                stockUpdated++;
                 updatedStockIds.add(a.id);
-            } else {
-                sourceErrors.push(`${a.name} (${symbol}) : ${sources.join(' | ')}`);
+            }
+        });
+
+        // --- Phase 2 : fallback séquentiel pour les échecs Yahoo ---
+        const failedYahoo = stockAssets.filter(a => {
+            const symbol = a.yahooTicker || a.ticker;
+            return symbol && !updatedStockIds.has(a.id);
+        });
+
+        if (failedYahoo.length > 0) {
+            let processed = 0;
+            for (const a of failedYahoo) {
+                processed++;
+                const symbol = a.yahooTicker || a.ticker;
+                if (!symbol) continue;
+
+                if (showToast) {
+                    updateProgressToast(
+                        `${yahooDone + processed} / ${stockAssets.length} · fallback`,
+                        60 + (processed / failedYahoo.length) * 40
+                    );
+                }
+
+                let price = null;
+
+                // Twelve Data (si configuré) — 8 s de pause entre appels
+                if (twelveDataApiKey) {
+                    try {
+                        price = await fetchTwelveDataQuote(symbol);
+                        if (processed < failedYahoo.length) {
+                            await new Promise(r => setTimeout(r, 8000));
+                        }
+                    } catch (err) { /* ignore */ }
+                }
+
+                // Finnhub (fallback US)
+                if (!price && finnhubApiKey) {
+                    try {
+                        price = await fetchFinnhubQuote(symbol);
+                    } catch (err) { /* ignore */ }
+                }
+
+                if (price) {
+                    a.value = a.qty * price;
+                    upsertTodayHistoryPoint(a, a.value, a.invested);
+                    updatedStockIds.add(a.id);
+                } else {
+                    const yahooErr = yahooResults[symbol]?.error || 'aucune source';
+                    sourceErrors.push(`${a.name} (${symbol}) : ${yahooErr}`);
+                }
             }
         }
-        if (stockUpdated > 0) updated += stockUpdated;
+
+        updated += updatedStockIds.size;
     }
 
-    // --- Pièces AuCoffre : estimation via cours de l'or ---
+    // --- Pièces AuCoffre ---
     try {
         const auCoffreUpdated = await updateAuCoffreAssetsFromGoldPrice();
         if (auCoffreUpdated > 0) updated += auCoffreUpdated;
     } catch (err) { console.warn('AuCoffre update failed:', err); }
 
-    // --- Sauvegarde + rendu unique en fin de parcours ---
     if (updated > 0) {
         saveToStorage();
         refreshAllUI();
     }
 
-    // --- Restauration de l'UI AVANT les alertes ---
     if (icon) icon.classList.remove('fa-spin');
     if (btn)  btn.disabled = false;
-
-    // Ferme le bandeau une fois tout terminé (léger délai pour laisser
-    // voir la barre à 100 % avant qu'il disparaisse).
     hideProgressToast(400);
 
-    // --- Notifications : toast non bloquant ---
     if (sourceErrors.length > 0 && updated === 0) {
-        // Échec total : toast d'erreur détaillé
         if (typeof toastError === 'function') {
             toastError(
-                `Aucun cours n'a pu être récupéré (${sourceErrors.length} actif(s))`,
-                sourceErrors.slice(0, 3).join(' · ') +
-                (sourceErrors.length > 3 ? ` (+${sourceErrors.length - 3} autres — voir console)` : ''),
+                `Aucun cours récupéré (${sourceErrors.length} actif(s))`,
+                sourceErrors.slice(0, 3).join(' · ') + (sourceErrors.length > 3 ? ' …' : ''),
                 { duration: 10000 }
             );
         }
-        console.warn('[Prices] Échecs détaillés :\n' + sourceErrors.join('\n'));
+        console.warn('[Prices] Échecs :\n' + sourceErrors.join('\n'));
     } else if (sourceErrors.length > 0) {
-        // Succès partiel : toast d'avertissement discret
         if (typeof toastWarning === 'function') {
             toastWarning(
                 `${updated} cours mis à jour, ${sourceErrors.length} échec(s)`,
-                sourceErrors.slice(0, 2).join(' · ') +
-                (sourceErrors.length > 2 ? ' …' : ''),
+                sourceErrors.slice(0, 2).join(' · ') + (sourceErrors.length > 2 ? ' …' : ''),
                 { duration: 7000 }
             );
         }
     } else if (updated > 0) {
-        // Succès total
         if (typeof toastSuccess === 'function') {
-            toastSuccess(`Cours actualisés`, `${updated} actif(s) mis à jour.`);
+            toastSuccess('Cours actualisés', `${updated} actif(s) mis à jour.`);
         }
     }
 
-    // --- Restauration explicite du contenu (si refreshAllUI() n'a pas déjà
-    // repeuplé le tableau — cas où updated === 0). ---
     if (document.querySelector('#table-inventory-body')?.querySelector('.skeleton-row')) {
         restoreSkeletonFor('#table-inventory-body', invBackup);
     }
@@ -1022,15 +1076,12 @@ async function fetchLivePrices() {
         restoreSkeletonFor('#table-crypto-body', cryptoBackup);
     }
 
-    // --- Mise à jour manuelle groupée pour tout le reste ---
-    // Les actifs déjà mis à jour automatiquement (crypto, devises, actions/ETF) sont exclus.
+    // --- Mise à jour manuelle groupée : UNIQUEMENT les actifs non couverts ---
     const autoUpdatedIds = new Set(
-        assets
-            .filter(a =>
-                (hasTag(a, 'Crypto') && cryptoMap[a.ticker.toUpperCase()]) ||
-                (hasTag(a, 'Devises/Liquidités') && currencyTickers.includes(a.ticker.toUpperCase()))
-            )
-            .map(a => a.id)
+        assets.filter(a =>
+            (hasTag(a, 'Crypto') && cryptoMap[a.ticker.toUpperCase()]) ||
+            (hasTag(a, 'Devises/Liquidités') && currencyTickers.includes(a.ticker.toUpperCase()))
+        ).map(a => a.id)
     );
     updatedStockIds.forEach(id => autoUpdatedIds.add(id));
 
@@ -1044,19 +1095,29 @@ async function fetchLivePrices() {
 // Mise à jour manuelle groupée (pour les actifs sans cours automatique)
 // ---------------------------------------------------------------------
 function openManualRefreshModal(manualAssets) {
-    document.getElementById('manual-refresh-body').innerHTML = manualAssets.map(a => {
-        const unitValue = a.qty ? (a.value / a.qty) : a.value;
-        return `<div class="grid grid-cols-[1fr_auto] items-center gap-3 p-2 bg-gray-950 border border-gray-800 rounded-lg" data-asset-id="${a.id}" data-qty="${a.qty}" data-invested="${a.invested}">
-            <div class="min-w-0">
-                <div class="font-bold text-white truncate">${escapeHTML(a.name)}</div>
-                <div class="text-[10px] text-gray-500 font-mono">${escapeHTML(a.ticker)} • Qté ${fmtQty(a.qty)} • Valeur actuelle : ${formatEUR(a.value)}</div>
-            </div>
-            <div class="flex items-center gap-1.5">
-                <span class="text-[10px] text-gray-500">Nouv. valeur unitaire</span>
-                <input type="number" step="any" class="manual-refresh-input w-28 bg-gray-900 border border-gray-800 rounded-lg p-1.5 text-white font-mono text-right focus:outline-none focus:border-teal-500" value="${unitValue.toFixed(4)}">
-            </div>
-        </div>`;
-    }).join('');
+    const body = document.getElementById('manual-refresh-body');
+    if (body) {
+        const preamble = `
+            <div class="bg-blue-950/20 border border-blue-800/40 rounded-lg p-3 mb-3 text-[11px] text-blue-200 leading-relaxed">
+                <i class="fa-solid fa-circle-info text-blue-400 mr-1"></i>
+                Les <b>${manualAssets.length} actif(s)</b> ci-dessous n'ont pas de cours public accessible depuis
+                un navigateur (Or physique, SCPI, obligations non cotées, immobilier…). Vérifiez leur valeur
+                unitaire actuelle et cliquez sur « Tout enregistrer » — ou ignorez pour plus tard.
+            </div>`;
+        body.innerHTML = preamble + manualAssets.map(a => {
+            const unitValue = a.qty ? (a.value / a.qty) : a.value;
+            return `<div class="grid grid-cols-[1fr_auto] items-center gap-3 p-2 bg-gray-950 border border-gray-800 rounded-lg" data-asset-id="${a.id}" data-qty="${a.qty}" data-invested="${a.invested}">
+                <div class="min-w-0">
+                    <div class="font-bold text-white truncate">${escapeHTML(a.name)}</div>
+                    <div class="text-[10px] text-gray-500 font-mono">${escapeHTML(a.ticker)} • Qté ${fmtQty(a.qty)} • Valeur actuelle : ${formatEUR(a.value)}</div>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] text-gray-500">Nouv. valeur unitaire</span>
+                    <input type="number" step="any" class="manual-refresh-input w-28 bg-gray-900 border border-gray-800 rounded-lg p-1.5 text-white font-mono text-right focus:outline-none focus:border-teal-500" value="${unitValue.toFixed(4)}">
+                </div>
+            </div>`;
+        }).join('');
+    }
     document.getElementById('modal-manual-refresh').classList.remove('hidden');
 }
 
@@ -1163,9 +1224,10 @@ function refreshAllUI() {
     // Chantier §6 — évaluation DCA (throttled 1 h, cooldown 1 mois)
     if (typeof evaluateDca === 'function') evaluateDca();
 
-    // Chantier §10 — section "Thèses à revoir" (uniquement sur l'accueil)
-    if (activeTab === 'tab-accueil' && typeof renderThesesReviewSection === 'function') {
-        renderThesesReviewSection();
+    // Chantier §10 — section "Thèses à revoir" + histogramme annuel (accueil)
+    if (activeTab === 'tab-accueil') {
+        if (typeof renderThesesReviewSection === 'function') renderThesesReviewSection();
+        if (typeof renderAnnualPnlChart === 'function') renderAnnualPnlChart();
     }
 }
 

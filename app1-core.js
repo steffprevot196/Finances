@@ -1991,26 +1991,102 @@ function undoCount() { return undoStack.length; }
 // =====================================================================
 // TIMELINE PORTEFEUILLE (utilisée par tous les graphiques)
 // =====================================================================
+// =====================================================================
+// TIMELINE PORTEFEUILLE — version robuste (fix incohérence 2026)
+// ---------------------------------------------------------------------
+// Le bug historique : les actifs importés (CSV, JSON, Drive) n'ont pas
+// d'entrée `history[]`. La courbe restait plate à 0 jusqu'à "aujourd'hui",
+// puis sautait brutalement à la valeur courante — rendant le graphique
+// incohérent avec les KPI du bandeau.
+//
+// Nouvelle logique :
+//   1. On nettoie et trie l'historique existant
+//   2. Si l'historique est vide/insuffisant, on le SYNTHÉTISE à partir
+//      des lots (chaque lot génère un point {date_achat, invested_cumulé})
+//   3. On force TOUJOURS un point "aujourd'hui" avec les valeurs courantes
+//   4. On déduplique par jour civil (pas par timestamp ms)
+// =====================================================================
 function buildPortfolioTimeline(assetList = assets) {
+    const todayKey = new Date().toDateString();
+
     const assetPoints = assetList.map(a => {
-        const pts = (a.history || [])
-            .map(h => ({ date: parseFlexDate(h.date), invested: h.invested ?? a.invested, value: h.value ?? a.value }))
-            .filter(p => p.date)
-            .sort((x, y) => x.date - y.date);
-        pts.push({ date: new Date(), invested: a.invested || 0, value: a.value || 0 });
+        // --- 1) Nettoie l'historique existant ---
+        let pts = (a.history || [])
+            .map(h => {
+                const d = parseFlexDate(h.date);
+                if (!d) return null;
+                return {
+                    date: d,
+                    invested: Number.isFinite(h.invested) ? h.invested : null,
+                    value: Number.isFinite(h.value) ? h.value : null
+                };
+            })
+            .filter(p => p && Number.isFinite(p.invested) && Number.isFinite(p.value));
+
+        // --- 2) Synthèse à partir des lots si historique insuffisant ---
+        const uniqueDates = new Set(pts.map(p => p.date.toDateString()));
+        if (uniqueDates.size < 1) {
+            const sortedLots = (a.lots || [])
+                .map(l => ({
+                    qty: Number(l.qty) || 0,
+                    price: Number(l.price) || 0,
+                    frais: Number(l.frais) || 0,
+                    _date: parseFlexDate(l.date)
+                }))
+                .filter(l => l._date && l.qty > 0)
+                .sort((x, y) => x._date - y._date);
+
+            if (sortedLots.length > 0) {
+                let cumInv = 0;
+                sortedLots.forEach(l => {
+                    const lotCost = l.qty * l.price + l.frais;
+                    cumInv += lotCost;
+                    pts.push({
+                        date: l._date,
+                        invested: cumInv,
+                        value: cumInv
+                    });
+                });
+            } else if (a.purchaseDate && (a.invested || 0) > 0) {
+                const d = parseFlexDate(a.purchaseDate);
+                if (d) pts.push({ date: d, invested: a.invested, value: a.invested });
+            }
+        }
+
+        // --- 3) Point "aujourd'hui" forcé (dédupliqué par jour civil) ---
+        pts = pts.filter(p => p.date.toDateString() !== todayKey);
+        const curInv = a.invested || 0;
+        const curVal = a.value || 0;
+        if (curInv > 0 || curVal > 0) {
+            pts.push({ date: new Date(), invested: curInv, value: curVal });
+        }
+
         pts.sort((x, y) => x.date - y.date);
         return pts;
     });
 
-    const allDates = [...new Set(assetPoints.flat().map(p => p.date.getTime()))].sort((a, b) => a - b);
+    // --- 4) Union des dates, dédupliquée par JOUR (pas par ms) ---
+    const dayMap = new Map();
+    assetPoints.forEach(pts => pts.forEach(p => {
+        const key = p.date.toISOString().slice(0, 10);
+        if (!dayMap.has(key)) dayMap.set(key, p.date.getTime());
+    }));
+    const allDates = [...dayMap.values()].sort((a, b) => a - b);
+
     const labels = [], investedSeries = [], valueSeries = [];
 
     allDates.forEach(t => {
         let totalInvested = 0, totalValue = 0;
         assetPoints.forEach(pts => {
             let last = null;
-            for (const p of pts) { if (p.date.getTime() <= t) last = p; else break; }
-            if (last) { totalInvested += last.invested || 0; totalValue += last.value || 0; }
+            for (const p of pts) {
+                if (p.date.getTime() <= t) last = p;
+                else break;
+            }
+            if (last) {
+                totalInvested += last.invested || 0;
+                totalValue    += last.value    || 0;
+            }
         });
         labels.push(new Date(t).toLocaleDateString('fr-FR', { month: 'short', year: 'numeric' }));
         investedSeries.push(Math.round(totalInvested * 100) / 100);

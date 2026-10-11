@@ -1757,3 +1757,227 @@ function renderCalendarHeatmap() {
 
     svg.innerHTML = html;
 }
+
+
+
+// =====================================================================
+// HISTOGRAMME ANNUEL P&L — Réalisé vs Latent (Ajout 2026)
+// ---------------------------------------------------------------------
+// Agrège par année civile :
+//   • P&L RÉALISÉ = somme des cessions dont dateVente ∈ année
+//   • P&L LATENT  = somme (value - invested) des actifs encore détenus
+//                   dont le PREMIER achat date de l'année
+// Basculable € / % via setAnnualPnlMode().
+// =====================================================================
+
+let annualPnlChartInstance = null;
+let _annualPnlMode = 'EUR';   // 'EUR' | 'PCT'
+
+function setAnnualPnlMode(mode) {
+    _annualPnlMode = (mode === 'PCT') ? 'PCT' : 'EUR';
+    const btnEur = document.getElementById('annual-pnl-btn-eur');
+    const btnPct = document.getElementById('annual-pnl-btn-pct');
+    const activeCls = 'px-2 py-1 rounded transition bg-indigo-950 text-indigo-300';
+    const inactiveCls = 'px-2 py-1 rounded transition text-gray-400 hover:text-white';
+    if (btnEur) btnEur.className = _annualPnlMode === 'EUR' ? activeCls : inactiveCls;
+    if (btnPct) btnPct.className = _annualPnlMode === 'PCT' ? activeCls : inactiveCls;
+    renderAnnualPnlChart();
+}
+
+function computeAnnualPnlData() {
+    const realAssets = assets.filter(a => !isPaperAsset(a));
+    const realCessions = cessions;
+
+    const allDates = [];
+    realAssets.forEach(a => {
+        (a.lots || []).forEach(l => {
+            const d = parseFlexDate(l.date);
+            if (d) allDates.push(d);
+        });
+        if (a.purchaseDate) {
+            const d = parseFlexDate(a.purchaseDate);
+            if (d) allDates.push(d);
+        }
+    });
+    realCessions.forEach(c => {
+        const d = parseFlexDate(c.dateVente);
+        if (d) allDates.push(d);
+    });
+    if (!allDates.length) return null;
+
+    const firstYear = Math.min(...allDates.map(d => d.getFullYear()));
+    const lastYear = new Date().getFullYear();
+
+    const years = [];
+    for (let y = firstYear; y <= lastYear; y++) {
+        // --- Réalisé ---
+        let realizedPnl = 0, realizedBase = 0, realizedCount = 0;
+        realCessions.forEach(c => {
+            const d = parseFlexDate(c.dateVente);
+            if (!d || d.getFullYear() !== y) return;
+            const pnl = (c.prixVente || 0) - (c.prixAchat || 0) - (c.frais || 0);
+            realizedPnl  += pnl;
+            realizedBase += (c.prixAchat || 0);
+            realizedCount++;
+        });
+
+        // --- Latent : actifs acquis en Y, encore détenus ---
+        let latentPnl = 0, latentBase = 0, latentCount = 0;
+        realAssets.forEach(a => {
+            let firstAcq = null;
+            (a.lots || []).forEach(l => {
+                const d = parseFlexDate(l.date);
+                if (d && (!firstAcq || d < firstAcq)) firstAcq = d;
+            });
+            if (!firstAcq && a.purchaseDate) firstAcq = parseFlexDate(a.purchaseDate);
+            if (!firstAcq || firstAcq.getFullYear() !== y) return;
+
+            latentPnl  += (a.value || 0) - (a.invested || 0);
+            latentBase += (a.invested || 0);
+            latentCount++;
+        });
+
+        years.push({
+            year: y,
+            realizedPnl,
+            realizedPct: realizedBase > 0 ? (realizedPnl / realizedBase) * 100 : 0,
+            realizedCount,
+            latentPnl,
+            latentPct: latentBase > 0 ? (latentPnl / latentBase) * 100 : 0,
+            latentCount
+        });
+    }
+    return years;
+}
+
+function renderAnnualPnlChart() {
+    const canvas = document.getElementById('annualPnlChart');
+    const emptyEl = document.getElementById('annual-pnl-empty');
+    if (!canvas) return;
+
+    const data = computeAnnualPnlData();
+
+    if (!data || data.length === 0) {
+        if (annualPnlChartInstance) {
+            annualPnlChartInstance.destroy();
+            annualPnlChartInstance = null;
+        }
+        if (emptyEl) emptyEl.classList.remove('hidden');
+        return;
+    }
+    if (emptyEl) emptyEl.classList.add('hidden');
+
+    // --- KPIs récapitulatifs ---
+    const totalReal = data.reduce((s, d) => s + d.realizedPnl, 0);
+    const totalLat  = data.reduce((s, d) => s + d.latentPnl, 0);
+    const totalRealCount = data.reduce((s, d) => s + d.realizedCount, 0);
+    const totalLatCount  = data.reduce((s, d) => s + d.latentCount, 0);
+
+    const setText = (id, txt, cls) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.innerText = txt;
+        if (cls !== undefined) el.className = cls;
+    };
+
+    setText('annual-pnl-stat-realized',
+        (totalReal >= 0 ? '+' : '') + formatEUR(totalReal),
+        `font-mono font-bold ${totalReal >= 0 ? 'text-emerald-400' : 'text-rose-400'}`);
+    setText('annual-pnl-stat-realized-detail', `${totalRealCount} cession(s) sur la période`);
+
+    setText('annual-pnl-stat-latent',
+        (totalLat >= 0 ? '+' : '') + formatEUR(totalLat),
+        `font-mono font-bold ${totalLat >= 0 ? 'text-emerald-400' : 'text-rose-400'}`);
+    setText('annual-pnl-stat-latent-detail', `${totalLatCount} actif(s) encore détenu(s)`);
+
+    const totals = data.map(d => ({
+        year: d.year,
+        total: d.realizedPnl + d.latentPnl,
+        pct: d.realizedPct + d.latentPct
+    }));
+    const best = totals.reduce((m, x) => x.total > m.total ? x : m, totals[0]);
+    const worst = totals.reduce((m, x) => x.total < m.total ? x : m, totals[0]);
+
+    const isPct = _annualPnlMode === 'PCT';
+    setText('annual-pnl-stat-best',
+        isPct ? (best.pct >= 0 ? '+' : '') + best.pct.toFixed(1) + ' %'
+              : (best.total >= 0 ? '+' : '') + formatEUR(best.total),
+        'font-mono font-bold text-emerald-400');
+    setText('annual-pnl-stat-best-year', 'Année ' + best.year);
+
+    setText('annual-pnl-stat-worst',
+        isPct ? (worst.pct >= 0 ? '+' : '') + worst.pct.toFixed(1) + ' %'
+              : (worst.total >= 0 ? '+' : '') + formatEUR(worst.total),
+        'font-mono font-bold text-rose-400');
+    setText('annual-pnl-stat-worst-year', 'Année ' + worst.year);
+
+    // --- Datasets ---
+    const labels = data.map(d => String(d.year));
+    const realizedValues = data.map(d => isPct ? d.realizedPct : d.realizedPnl);
+    const latentValues   = data.map(d => isPct ? d.latentPct   : d.latentPnl);
+
+    if (annualPnlChartInstance) annualPnlChartInstance.destroy();
+    annualPnlChartInstance = createChart('annualPnlChart', {
+        type: 'bar',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: isPct ? 'P&L réalisé (%)' : 'P&L réalisé (€)',
+                    data: realizedValues,
+                    backgroundColor: realizedValues.map(v => v >= 0 ? 'rgba(59,130,246,0.80)' : 'rgba(239,68,68,0.80)'),
+                    borderColor: realizedValues.map(v => v >= 0 ? '#3b82f6' : '#ef4444'),
+                    borderWidth: 1,
+                    borderRadius: 4
+                },
+                {
+                    label: isPct ? 'P&L latent (%)' : 'P&L latent (€)',
+                    data: latentValues,
+                    backgroundColor: latentValues.map(v => v >= 0 ? 'rgba(168,85,247,0.80)' : 'rgba(244,63,94,0.80)'),
+                    borderColor: latentValues.map(v => v >= 0 ? '#a855f7' : '#f43f5e'),
+                    borderWidth: 1,
+                    borderRadius: 4
+                }
+            ]
+        },
+        options: {
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+                legend: { labels: { color: _chartLegendColor(), boxWidth: 12, font: { size: 11 } } },
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => {
+                            const v = ctx.parsed.y;
+                            if (isPct) return `${ctx.dataset.label} : ${v >= 0 ? '+' : ''}${v.toFixed(2)} %`;
+                            return `${ctx.dataset.label} : ${v >= 0 ? '+' : ''}${formatEUR(v)}`;
+                        },
+                        afterBody: (ctx) => {
+                            const d = data[ctx[0].dataIndex];
+                            const lines = [];
+                            if (d.realizedCount > 0) lines.push(`${d.realizedCount} cession(s) cette année`);
+                            if (d.latentCount > 0)   lines.push(`${d.latentCount} actif(s) acquis cette année`);
+                            return lines;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: _chartTickColor(), font: { size: 11 }, maxRotation: 0 },
+                    grid: { display: false }
+                },
+                y: {
+                    beginAtZero: false,
+                    ticks: {
+                        color: _chartTickColor(),
+                        font: { size: 10 },
+                        callback: (v) => isPct ? v.toFixed(0) + ' %'
+                            : (Math.abs(v) >= 1000 ? (v / 1000).toFixed(1) + ' k€' : v + ' €')
+                    },
+                    grid: { color: _chartGridColor() }
+                }
+            }
+        }
+    });
+}
