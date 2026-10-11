@@ -2094,16 +2094,38 @@ function buildPortfolioTimeline(assetList) {
         }
 
         pts.sort((x, y) => x.date - y.date);
-        return pts;
+
+        // --- 3bis) ⭐ AGRÉGATION MENSUELLE (fix 2026) ---
+        // Ne conserve qu'UN SEUL point par mois : le DERNIER du mois.
+        // Objectif : ~12 points par an sur le graphique → axe X lisible,
+        // courbe lissée, plus de dents de scie.
+        const monthlyPts = [];
+        let lastMonthKey = null;
+        pts.forEach(p => {
+            const mk = p.date.getFullYear() + '-' + String(p.date.getMonth() + 1).padStart(2, '0');
+            if (mk !== lastMonthKey) {
+                monthlyPts.push(p);
+                lastMonthKey = mk;
+            } else {
+                // Remplace le point du mois en cours par le plus récent
+                monthlyPts[monthlyPts.length - 1] = p;
+            }
+        });
+
+        return monthlyPts;
     });
 
-    // --- 4) Union des dates, dédupliquée par jour civil ---
-    const dayMap = new Map();
+    // --- 4) Union des dates (déjà mensuelles), dédupliquée par MOIS ---
+    const monthMap = new Map();
     assetPoints.forEach(pts => pts.forEach(p => {
-        const key = p.date.toISOString().slice(0, 10);
-        if (!dayMap.has(key)) dayMap.set(key, p.date.getTime());
+        const mk = p.date.getFullYear() + '-' + String(p.date.getMonth() + 1).padStart(2, '0');
+        // Conserve la date la plus récente pour chaque mois
+        const existing = monthMap.get(mk);
+        if (!existing || p.date.getTime() > existing) {
+            monthMap.set(mk, p.date.getTime());
+        }
     }));
-    const allDates = [...dayMap.values()].sort((a, b) => a - b);
+    const allDates = [...monthMap.values()].sort((a, b) => a - b);
 
     const labels = [], investedSeries = [], valueSeries = [];
 

@@ -834,7 +834,6 @@ async function refreshRealPriceHistory() {
 function rebuildHistoryFromRealPrices(asset) {
     const ticker = (asset.ticker || '').toUpperCase();
     const series = realSeriesCache[ticker];
-    if (!Array.isArray(series) || series.length < 2) return false;
 
     // Récupère les lots triés par date
     const lots = (asset.lots || [])
@@ -848,46 +847,117 @@ function rebuildHistoryFromRealPrices(asset) {
         .sort((a, b) => a.d - b.d);
     if (lots.length === 0) return false;
 
-    // Fenêtre : 3 ans maximum pour ne pas exploser localStorage
-    const cutoff = Date.now() - 3 * 365 * 864e5;
+    // ⭐ Fenêtre étendue à 5 ans (au lieu de 3) pour couvrir 2023-2024
+    const cutoff = Date.now() - 5 * 365 * 864e5;
     const startTs = Math.max(lots[0].d.getTime(), cutoff);
 
-    const newHistory = [];
-    let cumQty = 0, cumInvested = 0, lotIdx = 0;
-    let lastWeekKey = null;
+    // -------------------- Cas 1 : cours réels disponibles --------------------
+    if (Array.isArray(series) && series.length >= 2) {
+        const newHistory = [];
+        let cumQty = 0, cumInvested = 0, lotIdx = 0;
+        let lastMonthKey = null;
 
-    for (const pt of series) {
-        if (pt.date < startTs) continue;
+        for (const pt of series) {
+            if (pt.date < startTs) continue;
 
-        // Applique tous les lots antérieurs ou égaux à cette date
-        while (lotIdx < lots.length && lots[lotIdx].d.getTime() <= pt.date) {
-            cumQty += lots[lotIdx].q;
-            cumInvested += lots[lotIdx].q * lots[lotIdx].p + lots[lotIdx].f;
-            lotIdx++;
+            while (lotIdx < lots.length && lots[lotIdx].d.getTime() <= pt.date) {
+                cumQty += lots[lotIdx].q;
+                cumInvested += lots[lotIdx].q * lots[lotIdx].p + lots[lotIdx].f;
+                lotIdx++;
+            }
+            if (cumQty <= 0) continue;
+
+            // ⭐ Échantillonnage MENSUEL (1 point par mois, dernier jour du mois)
+            const dd = new Date(pt.date);
+            const monthKey = dd.getFullYear() + '-' + String(dd.getMonth() + 1).padStart(2, '0');
+
+            if (monthKey !== lastMonthKey) {
+                newHistory.push({
+                    date: dd.toLocaleDateString('fr-FR'),
+                    value: cumQty * pt.price,
+                    invested: cumInvested
+                });
+                lastMonthKey = monthKey;
+            } else {
+                // Remplace le point existant (pour garder le dernier jour du mois)
+                newHistory[newHistory.length - 1] = {
+                    date: dd.toLocaleDateString('fr-FR'),
+                    value: cumQty * pt.price,
+                    invested: cumInvested
+                };
+            }
         }
-        if (cumQty <= 0) continue;
 
-        // Échantillonne 1 point par semaine (clé : année + n° de semaine)
-        const dd = new Date(pt.date);
-        const weekKey = dd.getFullYear() + '-W' + Math.floor((dd - new Date(dd.getFullYear(), 0, 1)) / 6048e5);
-
-        if (weekKey !== lastWeekKey) {
+        // Point final "aujourd'hui"
+        if (cumQty > 0) {
             newHistory.push({
-                date: dd.toLocaleDateString('fr-FR'),
-                value: cumQty * pt.price,
+                date: new Date().toLocaleDateString('fr-FR'),
+                value: asset.value,
                 invested: cumInvested
             });
-            lastWeekKey = weekKey;
+        }
+
+        if (newHistory.length >= 2) {
+            asset.history = newHistory;
+            return true;
         }
     }
 
-    // Point final "aujourd'hui" (valeur réelle actuelle)
-    if (cumQty > 0) {
-        newHistory.push({
-            date: new Date().toLocaleDateString('fr-FR'),
-            value: asset.value,
-            invested: cumInvested
-        });
+    // -------------------- Cas 2 : interpolation linéaire (fallback) --------------------
+    // Si aucun cours réel n'est disponible (obligations, SCPI, or physique,
+    // ou cours trop anciens non couverts), on génère un historique mensuel
+    // par interpolation linéaire entre le coût d'achat et la valeur actuelle.
+    //
+    // Méthode :
+    //   • À la date de chaque lot   → valeur = coût cumulé (gris = valeur)
+    //   • Entre deux lots           → valeur = coût cumulé
+    //   • Entre dernier lot et auj. → interpolation vers la valeur actuelle
+    //
+    // Ceci donne un tracé au moins cohérent (pas de trou, pas de saut brutal).
+
+    const firstDate = lots[0].d;
+    const today = new Date();
+    const spanMs = today.getTime() - firstDate.getTime();
+    if (spanMs < 30 * 864e5) return false;   // < 1 mois : rien à interpoler
+
+    // Coût cumulé à un instant T
+    const investedAt = (ts) => {
+        let sum = 0;
+        for (const l of lots) {
+            if (l.d.getTime() <= ts) sum += l.q * l.p + l.f;
+        }
+        return sum;
+    };
+
+    const totalInvested = investedAt(today.getTime());
+    const currentValue = asset.value || 0;
+    const totalGain = currentValue - totalInvested;
+
+    const newHistory = [];
+    const cursor = new Date(firstDate.getFullYear(), firstDate.getMonth(), 1);
+    let lastMonthKey = null;
+
+    while (cursor <= today) {
+        const ts = cursor.getTime();
+        const monthKey = cursor.getFullYear() + '-' + String(cursor.getMonth() + 1).padStart(2, '0');
+        if (monthKey !== lastMonthKey) {
+            const inv = investedAt(ts);
+
+            // Progression temporelle entre premier achat et aujourd'hui
+            const progress = Math.max(0, Math.min(1, (ts - firstDate.getTime()) / spanMs));
+
+            // Interpolation : valeur = investi + (gain_total × progression)
+            const val = inv + totalGain * progress;
+
+            newHistory.push({
+                date: cursor.toLocaleDateString('fr-FR'),
+                value: Math.max(0, val),
+                invested: inv
+            });
+            lastMonthKey = monthKey;
+        }
+        // Avance d'un mois
+        cursor.setMonth(cursor.getMonth() + 1);
     }
 
     if (newHistory.length >= 2) {
