@@ -2089,19 +2089,24 @@ function buildPortfolioTimeline(assetList) {
         valueSeries.push(Math.round(totalValue * 100) / 100);
     });
 
-    // --- 5) Auto-diagnostic (désactivé en mode paper ou si option d'inclusion) ---
-    // On ne log le warning QUE si le pic est suspect ET que les actifs ne sont
-    // pas tous marqués comme papier (sinon c'est du bruit inutile).
-    const realAssetCount = list.filter(a => !isPaperAsset(a)).length;
-    const hasRealAssets = realAssetCount > 0;
-    const currentTotalInv = list.reduce((s, a) => s + (a.invested || 0), 0);
-    const maxInv = Math.max(0, ...investedSeries);
-    if (hasRealAssets && currentTotalInv > 0 && maxInv > currentTotalInv * 2) {
-        console.warn(
-            `[Timeline] Anomalie détectée : pic investi (${maxInv.toFixed(0)} €) ` +
-            `supérieur à 2× le total actuel (${currentTotalInv.toFixed(0)} €). ` +
-            `Lancez debugPortfolioData() dans la console pour identifier l'actif fautif.`
-        );
+    // --- 5) Auto-diagnostic (throttlé à 1 log par session) ---
+    // Le warning se déclenchait à chaque render (donc ~20× par chargement de
+    // page, car buildPortfolioTimeline est appelé par scoreCellHTML, riskCellHTML,
+    // calculateRiskMetrics, etc.). On le limite à un seul log par session.
+    if (!window._timelineAnomalyLogged) {
+        const realAssetCount = list.filter(a => !isPaperAsset(a)).length;
+        const hasRealAssets = realAssetCount > 0;
+        const currentTotalInv = list.reduce((s, a) => s + (a.invested || 0), 0);
+        const maxInv = Math.max(0, ...investedSeries);
+        if (hasRealAssets && currentTotalInv > 0 && maxInv > currentTotalInv * 2) {
+            window._timelineAnomalyLogged = true;
+            console.warn(
+                `[Timeline] Anomalie détectée : pic investi (${maxInv.toFixed(0)} €) ` +
+                `supérieur à 2× le total actuel (${currentTotalInv.toFixed(0)} €). ` +
+                `Lancez debugPortfolioData() dans la console pour identifier l'actif fautif.\n` +
+                `(Ce warning ne s'affichera plus pendant cette session.)`
+            );
+        }
     }
 
     return { labels, investedSeries, valueSeries, rawDates: allDates };

@@ -2532,20 +2532,26 @@ _suite('detectStaleTheses');
     assertEq(detectStaleTheses().length, 0, 'detectStaleTheses : thèse ancienne en gain → 0');
 
     // --- Cas 4 : thèse ancienne + perte → détecté ---
+    // ⚠ Fix 2026 : vérifie que r4[0] existe AVANT d'accéder à .asset
+    // (avant, un échec silencieux de la détection faisait crasher tout le test)
     assets[0].value = 50;    // perte -50 % (sous le seuil -20 %)
     const r4 = detectStaleTheses();
     assertEq(r4.length, 1, 'detectStaleTheses : thèse ancienne + perte → 1');
-    assertEq(r4[0].asset.id, 942001, 'detectStaleTheses : bon actif');
-    assertTrue(r4[0].ageDays >= 500, 'detectStaleTheses : ageDays ≥ 500');
-    assertApprox(r4[0].pnlPct, -50, 0.5, 'detectStaleTheses : pnlPct ≈ -50 %');
+    if (r4.length > 0 && r4[0]) {
+        assertEq(r4[0].asset.id, 942001, 'detectStaleTheses : bon actif');
+        assertTrue(r4[0].ageDays >= 500, 'detectStaleTheses : ageDays ≥ 500');
+        assertApprox(r4[0].pnlPct, -50, 0.5, 'detectStaleTheses : pnlPct ≈ -50 %');
+    } else {
+        _assert(false, 'detectStaleTheses : r4[0] doit exister',
+            `r4.length = ${r4.length} — la détection a échoué silencieusement`);
+    }
 
     // --- Cas 5 : perte légère (> -20 %) → pas détecté ---
-    assets[0].value = 85;    // perte -15 % (au-dessus du seuil -20 %)
+    if (assets[0]) assets[0].value = 85;    // perte -15 % (au-dessus du seuil -20 %)
     assertEq(detectStaleTheses().length, 0, 'detectStaleTheses : perte < 20 % → 0');
 
     // --- Cas 6 : tri par sévérité décroissante ---
     assets.length = 0;
-    // Créer 3 actifs avec des profils de sévérité différents
     const createAsset = (id, name, value, invested, ageDays) => {
         assets.push({
             id, name, ticker: name,
@@ -2555,16 +2561,18 @@ _suite('detectStaleTheses');
         });
         setAssetThesis(id, 'Thèse');
         const a = assets.find(x => x.id === id);
-        a.thesis.lastReviewedAt = Date.now() - ageDays * 864e5;
+        if (a && a.thesis) a.thesis.lastReviewedAt = Date.now() - ageDays * 864e5;
     };
-    createAsset(950001, 'Light', 800, 1000, 400);      // -20 % sur 400 j → seuil juste atteint
-    createAsset(950002, 'Severe', 300, 1000, 800);     // -70 % sur 800 j → très sévère
-    createAsset(950003, 'Medium', 500, 1000, 500);     // -50 % sur 500 j → moyen
+    createAsset(950001, 'Light', 800, 1000, 400);
+    createAsset(950002, 'Severe', 300, 1000, 800);
+    createAsset(950003, 'Medium', 500, 1000, 500);
 
     const r6 = detectStaleTheses();
     assertEq(r6.length, 3, 'detectStaleTheses : 3 détectés');
-    assertEq(r6[0].asset.name, 'Severe', 'detectStaleTheses : "Severe" en 1er (plus critique)');
-    assertEq(r6[2].asset.name, 'Light', 'detectStaleTheses : "Light" en dernier');
+    if (r6.length >= 3) {
+        assertEq(r6[0].asset.name, 'Severe', 'detectStaleTheses : "Severe" en 1er (plus critique)');
+        assertEq(r6[2].asset.name, 'Light', 'detectStaleTheses : "Light" en dernier');
+    }
 
     // --- Cas 7 : paper trading exclu ---
     assets.push({
