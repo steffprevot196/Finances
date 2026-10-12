@@ -61,6 +61,7 @@ const auCoffreCatalog = [
     { name: 'Krugerrand 1oz Or (Afrique du Sud)', ticker: 'KRUG1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2460.00 },
     { name: 'Krugerrand 1/2oz Or', ticker: 'KRUG1/2OZ', weightGrams: 15.55, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 1250.00 },
     { name: 'Krugerrand 1/4oz Or', ticker: 'KRUG1/4OZ', weightGrams: 7.78, primePct: 0.06, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 640.00 },
+    { name: 'Krugerrand 1/10oz Or', ticker: 'KRUG1/10OZ', weightGrams: 3.11, primePct: 0.07, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 265.00 },
     { name: 'Souverain Elisabeth II / George V Or', ticker: 'SOV-OR', weightGrams: 7.32, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 550.00 },
     { name: 'Maple Leaf 1oz Or (Canada)', ticker: 'MAPLE1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2475.00 },
     { name: 'Philharmonique 1oz Or (Autriche)', ticker: 'PHIL1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2470.00 },
