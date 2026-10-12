@@ -1505,7 +1505,10 @@ async function decryptPayload(envelope, passphrase) {
         return JSON.parse(new TextDecoder().decode(plain));
     }
 
-    const { key } = await getOrCreateMasterKey(passphrase);
+    // ⚠️ FIX 2026 : mode 'decrypt' → la clé ne sera JAMAIS écrasée même
+    //    si la passphrase est erronée (évite la perte du backup en cas de
+    //    faute de frappe).
+    const { key } = await getOrCreateMasterKey(passphrase, { mode: 'decrypt' });
     const plain = await crypto.subtle.decrypt(
         { name: 'AES-GCM', iv: fromB64(envelope.iv) }, key, fromB64(envelope.data)
     );
@@ -1801,13 +1804,25 @@ async function deriveMasterKey(passphrase, salt) {
     );
 }
 
-// Récupère la clé mémorisée (si elle correspond à la phrase fournie),
-// sinon la dérive et la mémorise. Retourne { key, isNew }.
-async function getOrCreateMasterKey(passphrase) {
-    // ── SECURITY ── Refus du sentinel vide/'__cached__' en tant que passphrase
-    // réelle : un appel avec sentinel doit IMPÉRATIVEMENT retrouver une clé
-    // mémorisée valide. Sinon on lève une erreur claire, au lieu de dériver
-    // silencieusement une clé faible à partir du littéral '__cached__'.
+// Récupère la clé mémorisée ou en dérive une.
+//
+// ⚠️ FIX CRITIQUE 2026 : séparation stricte entre mode "encrypt" et
+// "decrypt". Avant ce fix, appeler la fonction avec une passphrase qui
+// ne correspondait pas à la clé stockée ÉCRASAIT la clé mémorisée,
+// rendant impossible tout déchiffrement des backups existants.
+//
+//   • mode 'auto' (défaut) : comportement historique (peut écraser)
+//   • mode 'encrypt'       : peut créer/écraser une nouvelle clé
+//   • mode 'decrypt'       : ne stocke JAMAIS — dérive à la volée et
+//                            utilise le sel de la clé existante si
+//                            disponible, pour retrouver la clé
+//                            correspondant à la passphrase saisie.
+//
+// Retourne { key, isNew, notStored? }.
+async function getOrCreateMasterKey(passphrase, opts = {}) {
+    const mode = opts.mode || 'auto';
+
+    // ── Cas 1 : sentinel (utiliser la clé mémorisée) ──
     if (!passphrase || passphrase === '__cached__') {
         const stored = await keyDBGet('driveMasterKey');
         if (!stored || !stored.key) {
@@ -1828,19 +1843,60 @@ async function getOrCreateMasterKey(passphrase) {
         return { key: stored.key, isNew: false };
     }
 
+    // ── Cas 2 : passphrase fournie explicitement ──
     const stored = await keyDBGet('driveMasterKey');
-    if (stored && stored.key) {
+
+    // 2a. Si une clé est stockée avec un sel, on teste si la passphrase
+    //     saisie correspond (re-dérivation à partir du MÊME sel).
+    if (stored && stored.key && stored.salt) {
         try {
+            const candidateKey = await deriveMasterKey(passphrase, new Uint8Array(stored.salt));
             const probe = await crypto.subtle.decrypt(
                 { name: 'AES-GCM', iv: new Uint8Array(stored.witnessIv) },
-                stored.key,
+                candidateKey,
                 new Uint8Array(stored.witness)
             );
             if (new TextDecoder().decode(probe) === KEY_WITNESS) {
-                return { key: stored.key, isNew: false };
+                // La passphrase correspond à la clé stockée : on la réutilise.
+                return { key: candidateKey, isNew: false };
             }
-        } catch { /* phrase différente → nouvelle dérivation */ }
+        } catch (_) { /* pas de match → on continue */ }
     }
+
+    // 2b. Mode 'decrypt' : NE JAMAIS écraser la clé stockée.
+    //     On dérive à la volée, avec le sel de la clé existante si présent
+    //     (pour retrouver la même clé qu'un backup créé sur un autre appareil
+    //     avec la même passphrase).
+    if (mode === 'decrypt') {
+        const salt = (stored && stored.salt)
+            ? new Uint8Array(stored.salt)
+            : crypto.getRandomValues(new Uint8Array(16));
+        const key = await deriveMasterKey(passphrase, salt);
+        console.info('[Key] Mode decrypt : clé dérivée à la volée (non stockée).');
+        return { key, isNew: false, notStored: true };
+    }
+
+    // 2c. Aucune clé stockée : on peut créer et mémoriser.
+    if (!stored || !stored.key) {
+        const salt = crypto.getRandomValues(new Uint8Array(16));
+        const key  = await deriveMasterKey(passphrase, salt);
+        const iv   = crypto.getRandomValues(new Uint8Array(12));
+        const witness = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv }, key, new TextEncoder().encode(KEY_WITNESS)
+        );
+        await keyDBSet('driveMasterKey', {
+            key,
+            salt: Array.from(salt),
+            witness: Array.from(new Uint8Array(witness)),
+            witnessIv: Array.from(iv),
+            createdAt: Date.now()
+        });
+        return { key, isNew: true };
+    }
+
+    // 2d. Une clé existe avec une AUTRE passphrase.
+    //     - en mode 'encrypt' : on ÉCRASE (comportement legacy, délibéré).
+    //     - en mode 'auto'    : on ÉCRASE aussi (compat historique).
     const salt = crypto.getRandomValues(new Uint8Array(16));
     const key  = await deriveMasterKey(passphrase, salt);
     const iv   = crypto.getRandomValues(new Uint8Array(12));
@@ -1901,9 +1957,6 @@ async function pullFromDrive(fileId) {
         assets.forEach(normalizeAsset);
         cessions.forEach(normalizeCession);
 
-        // Restauration des clés API si présentes dans l'enveloppe chiffrée.
-        // ⚠ Session-only : on les remet en mémoire volatile, JAMAIS en
-        //   localStorage (cohérent avec la politique de sécurité M3).
         if (payload.apiKeys && typeof payload.apiKeys === 'object') {
             try {
                 if (typeof payload.apiKeys.finnhub === 'string') {
@@ -1930,13 +1983,29 @@ async function pullFromDrive(fileId) {
         saveToStorage(); saveCessions(); saveArbitrages();
         refreshAllUI();
 
-        // Rafraîchit l'UI des champs de clés dans le modal Synchronisation
         if (typeof initDriveSyncUI === 'function') initDriveSyncUI();
 
         alert('Données restaurées depuis Google Drive.'
             + (payload.apiKeys ? '\n\nLes clés API ont été restaurées en mémoire de session.' : ''));
     } catch (err) {
-        alert('Échec de la restauration (mauvaise phrase secrète ou fichier corrompu ?) : ' + err.message);
+        const msg = err.message || 'erreur inconnue';
+        // Message enrichi : aide l'utilisateur à diagnostiquer
+        const isCryptoError = /operation-specific|decrypt|witness|corrompue/i.test(msg);
+        if (isCryptoError) {
+            alert(
+                '🔐 Échec du déchiffrement\n\n' +
+                'Cause : la clé de déchiffrement ne correspond pas à celle utilisée lors de l\'envoi.\n\n' +
+                'Solutions :\n' +
+                '1. Saisissez la phrase secrète EXACTE utilisée lors de la sauvegarde Drive\n' +
+                '   (majuscules/minuscules et espaces comptent)\n' +
+                '2. Si le backup a été créé sur un AUTRE appareil, il faut la même phrase\n' +
+                '3. Si vous avez oublié la phrase, le backup ne peut PAS être récupéré\n' +
+                '   (chiffrement AES-256 sans porte dérobée)\n\n' +
+                'Détail technique : ' + msg
+            );
+        } else {
+            alert('Échec de la restauration : ' + msg);
+        }
     }
 }
 
