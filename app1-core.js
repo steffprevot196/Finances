@@ -68,6 +68,9 @@ const auCoffreCatalog = [
     { name: '20 Dollars US Double Eagle Or', ticker: 'USD20', weightGrams: 30.09, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2450.00 },
     { name: 'American Eagle 1oz Or', ticker: 'EAGLE1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2485.00 },
     { name: 'Britannia 1oz Or (Royaume-Uni)', ticker: 'BRIT1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2475.00 },
+    { name: 'Britannia 1/2oz Or (Royaume-Uni)', ticker: 'BRIT1/2OZ', weightGrams: 15.55, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 1255.00 },
+    { name: 'Britannia 1/4oz Or (Royaume-Uni)', ticker: 'BRIT1/4OZ', weightGrams: 7.78, primePct: 0.06, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 640.00 },
+    { name: 'Britannia 1/10oz Or (Royaume-Uni)', ticker: 'BRIT1/10OZ', weightGrams: 3.11, primePct: 0.07, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 260.00 },
     { name: 'Panda 30g Or (Chine)', ticker: 'PANDA30G', weightGrams: 30.00, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2400.00 },
 
     // ═══════════════════════════════════════════════════════════════
