@@ -1483,36 +1483,104 @@ function setDriveClientId(id)  { localStorage.setItem('patriMonial_driveClientId
 // mémorisée (une seule dérivation PBKDF2 par appareil, pas par sauvegarde).
 // Format v1 reste déchiffrable pour la compatibilité avec les anciennes
 // sauvegardes Drive (schéma d'origine : sel par enveloppe).
+// ⚠️ FIX CRITIQUE 2026 : le sel de dérivation PBKDF2 est désormais STOCKÉ
+// DANS L'ENVELOPPE (format v3). Sans ce sel, impossible de re-dériver la
+// même clé sur un autre appareil → c'était la cause racine du bug de
+// synchronisation Drive entre PC et smartphone.
+//
+// Le sel n'est PAS secret (son rôle = prévenir les rainbow tables), il
+// peut être stocké en clair avec le backup.
 async function encryptPayload(obj, passphrase) {
-    const { key } = await getOrCreateMasterKey(passphrase);
+    const toB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+
+    let key, salt;
+
+    if (passphrase) {
+        // Nouvelle phrase secrète → nouveau sel + nouvelle clé
+        salt = crypto.getRandomValues(new Uint8Array(16));
+        key = await deriveMasterKey(passphrase, salt);
+        // Mémorise ce couple (clé, sel) localement pour les sauvegardes
+        // suivantes sur le même appareil
+        const ivWitness = crypto.getRandomValues(new Uint8Array(12));
+        const witness = await crypto.subtle.encrypt(
+            { name: 'AES-GCM', iv: ivWitness }, key, new TextEncoder().encode(KEY_WITNESS)
+        );
+        await keyDBSet('driveMasterKey', {
+            key,
+            salt: Array.from(salt),
+            witness: Array.from(new Uint8Array(witness)),
+            witnessIv: Array.from(ivWitness),
+            createdAt: Date.now()
+        });
+    } else {
+        // Sentinel : utilise la clé + le sel mémorisés localement
+        const stored = await keyDBGet('driveMasterKey');
+        if (!stored || !stored.key || !stored.salt) {
+            throw new Error('Aucune clé mémorisée — saisissez la phrase secrète.');
+        }
+        key = stored.key;
+        salt = new Uint8Array(stored.salt);
+    }
+
     const iv = crypto.getRandomValues(new Uint8Array(12));
     const cipher = await crypto.subtle.encrypt(
         { name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(obj))
     );
-    const toB64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
-    return { v: 2, iv: toB64(iv), data: toB64(cipher) };
+
+    return {
+        v: 3,
+        salt: toB64(salt),      // ← LE FIX : sel embarqué dans l'enveloppe
+        iv: toB64(iv),
+        data: toB64(cipher)
+    };
 }
 
 async function decryptPayload(envelope, passphrase) {
     const fromB64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 
-    // Compatibilité avec les sauvegardes v1 (ancien format, sel par enveloppe)
+    // ── Format v3 (nouveau, 2026) : sel embarqué → multi-appareil ──
+    if (envelope.v === 3 && envelope.salt) {
+        const salt = fromB64(envelope.salt);
+        const key = await deriveMasterKey(passphrase, salt);
+        const plain = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: fromB64(envelope.iv) }, key, fromB64(envelope.data)
+        );
+        console.info('[Decrypt] ✓ Format v3 (sel embarqué) — compatible multi-appareil');
+        return JSON.parse(new TextDecoder().decode(plain));
+    }
+
+    // ── Format v1 (legacy) : sel embarqué aussi ──
     if (envelope.v === 1 && envelope.salt) {
         const key = await deriveMasterKey(passphrase, fromB64(envelope.salt));
         const plain = await crypto.subtle.decrypt(
             { name: 'AES-GCM', iv: fromB64(envelope.iv) }, key, fromB64(envelope.data)
         );
+        console.info('[Decrypt] ✓ Format v1 (sel embarqué)');
         return JSON.parse(new TextDecoder().decode(plain));
     }
 
-    // ⚠️ FIX 2026 : mode 'decrypt' → la clé ne sera JAMAIS écrasée même
-    //    si la passphrase est erronée (évite la perte du backup en cas de
-    //    faute de frappe).
-    const { key } = await getOrCreateMasterKey(passphrase, { mode: 'decrypt' });
-    const plain = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: fromB64(envelope.iv) }, key, fromB64(envelope.data)
-    );
-    return JSON.parse(new TextDecoder().decode(plain));
+    // ── Format v2 (legacy cassé) : PAS de sel → déchiffrable UNIQUEMENT
+    //    sur l'appareil d'origine (qui possède la clé + sel en IndexedDB) ──
+    if (envelope.v === 2) {
+        const stored = await keyDBGet('driveMasterKey');
+        if (!stored || !stored.key) {
+            throw new Error(
+                '🔐 Ce backup est au format v2 (obsolète) qui n\'embarque pas ' +
+                'le sel de dérivation.\n\n' +
+                'Il ne peut être déchiffré QUE sur l\'appareil qui l\'a créé.\n\n' +
+                'Solution : restaurez-le sur votre PC (où la clé est mémorisée), ' +
+                'puis cliquez à nouveau sur « Envoyer une sauvegarde » — le nouveau ' +
+                'backup sera en format v3 et fonctionnera sur tous vos appareils.'
+            );
+        }
+        const plain = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv: fromB64(envelope.iv) }, stored.key, fromB64(envelope.data)
+        );
+        console.info('[Decrypt] ✓ Format v2 (clé locale uniquement)');
+        return JSON.parse(new TextDecoder().decode(plain));
+    }
+
+    throw new Error('Format de sauvegarde inconnu : v' + (envelope.v || '?'));
 }
 
 // --- Modal de synchronisation ---
