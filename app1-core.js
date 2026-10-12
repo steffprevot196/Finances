@@ -3,11 +3,30 @@
 // Aucune dépendance DOM. Chargé en premier.
 // =====================================================================
 
+
 // --- CATALOGUE AUCOFFRE.COM (Jetons Or/Argent, Pièces, Lingots) ---
-// Ordonné du format le plus GRAND au plus PETIT pour les séries Vera Valor.
-// Vera Valor existe en : 1oz, 1/2oz, 1/4oz, 1/10oz, 1/20oz, 1/25oz.
+// Organisé par famille de produits, du format le plus GRAND au plus PETIT.
+//
+// Les prix `basePriceEUR` sont indicatifs (cours de référence à ~2500 €/oz).
+// Ils pré-remplissent le formulaire mais restent modifiables.
+//
+// taxCategory possibles :
+//   • JETON           → Art. 150 VJ CGI (exonéré si vente ≤ 5 000 €)
+//   • COURS_LEGAL     → TFMP 11,5 % ou TPV 36,2 % avec abattement 5 %/an
+//   • METAUX_PRECIEUX → Lingots : TFMP 11,5 % ou TPV
 const auCoffreCatalog = [
-    // ── Vera Valor Gold (Or Pur 999.9) ──
+    // ═══════════════════════════════════════════════════════════════
+    // VERA ONE — gamme originale (2019), jeton or 999.9
+    // ═══════════════════════════════════════════════════════════════
+    { name: 'Vera One 1 Ounce Gold (Or Pur 999.9)', ticker: 'VO1OZ', weightGrams: 31.10, primePct: 0.02, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 2500.00 },
+    { name: 'Vera One 1/2 Ounce Gold (Or Pur 999.9)', ticker: 'VO1/2OZ', weightGrams: 15.55, primePct: 0.02, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 1270.00 },
+    { name: 'Vera One 1/4 Ounce Gold (Or Pur 999.9)', ticker: 'VO1/4OZ', weightGrams: 7.78, primePct: 0.025, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 640.00 },
+    { name: 'Vera One 1/10 Ounce Gold (Or Pur 999.9)', ticker: 'VO1/10OZ', weightGrams: 3.11, primePct: 0.02, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 268.00 },
+    { name: 'Vera One 1/20 Ounce Gold (Or Pur 999.9)', ticker: 'VO1/20OZ', weightGrams: 1.58, primePct: 0.02, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 138.00 },
+
+    // ═══════════════════════════════════════════════════════════════
+    // VERA VALOR — gamme alternative, jeton or 999.9
+    // ═══════════════════════════════════════════════════════════════
     { name: 'Vera Valor 1 Ounce Gold (Or Pur 999.9)', ticker: 'VV1OZ', weightGrams: 31.10, primePct: 0.02, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 2480.00 },
     { name: 'Vera Valor 1/2 Ounce Gold (Or Pur 999.9)', ticker: 'VV1/2OZ', weightGrams: 15.55, primePct: 0.02, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 1260.00 },
     { name: 'Vera Valor 1/4 Ounce Gold (Or Pur 999.9)', ticker: 'VV1/4OZ', weightGrams: 7.78, primePct: 0.025, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 630.00 },
@@ -15,25 +34,57 @@ const auCoffreCatalog = [
     { name: 'Vera Valor 1/20 Ounce Gold (Or Pur 999.9)', ticker: 'VV1/20OZ', weightGrams: 1.58, primePct: 0.02, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 135.00 },
     { name: 'Vera Valor 1/25 Ounce Gold (Or Pur 999.9)', ticker: 'VV1/25OZ', weightGrams: 1.24, primePct: 0.03, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 110.00 },
 
-    // ── Vera Max Gold ──
+    // ═══════════════════════════════════════════════════════════════
+    // VERA MAX — gamme économique
+    // ═══════════════════════════════════════════════════════════════
+    { name: 'Vera Max 1/4 Ounce Gold', ticker: 'VMAX1/4', weightGrams: 7.78, primePct: 0.025, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 635.00 },
     { name: 'Vera Max 1/10 Ounce Gold', ticker: 'VMAX1/10', weightGrams: 3.11, primePct: 0.02, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 270.00 },
 
-    // ── Vera Silver (Argent) ──
+    // ═══════════════════════════════════════════════════════════════
+    // VERA SILVER — gamme argent
+    // ═══════════════════════════════════════════════════════════════
     { name: 'Vera Silver 1oz Argent', ticker: 'VS1OZ', weightGrams: 31.10, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 32.50 },
+    { name: 'Vera Silver 1/2oz Argent', ticker: 'VS1/2OZ', weightGrams: 15.55, primePct: 0.06, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'JETON', basePriceEUR: 17.50 },
 
-    // ── Pièces à Cours Légal ──
+    // ═══════════════════════════════════════════════════════════════
+    // PIÈCES FRANÇAISES À COURS LÉGAL
+    // ═══════════════════════════════════════════════════════════════
     { name: 'Napoléon 20 Francs Or (Louis d\'Or)', ticker: 'NAP20', weightGrams: 5.80, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 445.00 },
     { name: 'Napoléon 10 Francs Or (Demi-Napoléon)', ticker: 'NAP10', weightGrams: 2.90, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 230.00 },
-    { name: 'Krugerrand 1oz Or', ticker: 'KRUG1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2460.00 },
-    { name: 'Souverain Elisabeth II / George V Or', ticker: 'SOV-OR', weightGrams: 7.32, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 550.00 },
-    { name: '50 Pesos Or Mexicain', ticker: 'PESO50', weightGrams: 37.50, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2980.00 },
-    { name: 'Maple Leaf 1oz Or', ticker: 'MAPLE1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2475.00 },
-    { name: 'Philharmonique 1oz Or', ticker: 'PHIL1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2470.00 },
+    { name: 'Napoléon 5 Francs Or', ticker: 'NAP5', weightGrams: 1.45, primePct: 0.06, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 130.00 },
+    { name: '20 Francs Coq / Marianne Or', ticker: 'COQ20', weightGrams: 5.80, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 440.00 },
+    { name: '10 Francs Coq / Marianne Or', ticker: 'COQ10', weightGrams: 2.90, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 225.00 },
 
-    // ── Lingots & Lingotins ──
-    { name: 'Lingot 1kg Or Pur 999', ticker: 'LING1KG', weightGrams: 1000, primePct: 0.01, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 78500.00 },
-    { name: 'Lingotin 100g Or Pur 999', ticker: 'LING100G', weightGrams: 100, primePct: 0.01, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 7880.00 }
+    // ═══════════════════════════════════════════════════════════════
+    // PIÈCES INTERNATIONALES À COURS LÉGAL
+    // ═══════════════════════════════════════════════════════════════
+    { name: 'Krugerrand 1oz Or (Afrique du Sud)', ticker: 'KRUG1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2460.00 },
+    { name: 'Krugerrand 1/2oz Or', ticker: 'KRUG1/2OZ', weightGrams: 15.55, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 1250.00 },
+    { name: 'Krugerrand 1/4oz Or', ticker: 'KRUG1/4OZ', weightGrams: 7.78, primePct: 0.06, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 640.00 },
+    { name: 'Souverain Elisabeth II / George V Or', ticker: 'SOV-OR', weightGrams: 7.32, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 550.00 },
+    { name: 'Maple Leaf 1oz Or (Canada)', ticker: 'MAPLE1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2475.00 },
+    { name: 'Philharmonique 1oz Or (Autriche)', ticker: 'PHIL1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2470.00 },
+    { name: '50 Pesos Or Mexicain', ticker: 'PESO50', weightGrams: 37.50, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2980.00 },
+    { name: '20 Dollars US Double Eagle Or', ticker: 'USD20', weightGrams: 30.09, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2450.00 },
+    { name: 'American Eagle 1oz Or', ticker: 'EAGLE1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2485.00 },
+    { name: 'Britannia 1oz Or (Royaume-Uni)', ticker: 'BRIT1OZ', weightGrams: 31.10, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2475.00 },
+    { name: 'Panda 30g Or (Chine)', ticker: 'PANDA30G', weightGrams: 30.00, primePct: 0.05, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'COURS_LEGAL', basePriceEUR: 2400.00 },
+
+    // ═══════════════════════════════════════════════════════════════
+    // LINGOTS & LINGOTINS
+    // ═══════════════════════════════════════════════════════════════
+    { name: 'Lingot 1kg Or Pur 999.9', ticker: 'LING1KG', weightGrams: 1000, primePct: 0.01, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 79000.00 },
+    { name: 'Lingot 500g Or Pur 999.9', ticker: 'LING500G', weightGrams: 500, primePct: 0.012, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 39600.00 },
+    { name: 'Lingot 250g Or Pur 999.9', ticker: 'LING250G', weightGrams: 250, primePct: 0.015, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 19900.00 },
+    { name: 'Lingotin 100g Or Pur 999.9', ticker: 'LING100G', weightGrams: 100, primePct: 0.015, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 8000.00 },
+    { name: 'Lingotin 50g Or Pur 999.9', ticker: 'LING50G', weightGrams: 50, primePct: 0.02, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 4030.00 },
+    { name: 'Lingotin 20g Or Pur 999.9', ticker: 'LING20G', weightGrams: 20, primePct: 0.025, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 1630.00 },
+    { name: 'Lingotin 10g Or Pur 999.9', ticker: 'LING10G', weightGrams: 10, primePct: 0.03, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 830.00 },
+    { name: 'Lingotin 5g Or Pur 999.9', ticker: 'LING5G', weightGrams: 5, primePct: 0.04, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 425.00 },
+    { name: 'Lingotin 1g Or Pur 999.9', ticker: 'LING1G', weightGrams: 1, primePct: 0.08, category: 'Or & Métaux', cadran: 'OR', taxCategory: 'METAUX_PRECIEUX', basePriceEUR: 95.00 }
 ];
+
+
 
 // --- CATALOGUE ACTIONS / ETF / FOREX ---
 const popularMarketAssets = [
