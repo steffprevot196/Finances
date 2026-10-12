@@ -43,13 +43,13 @@
                                https://api.coingecko.com
                                https://api.frankfurter.dev
                                https://finnhub.io
-                               https://xaus.com
                                https://www.googleapis.com
                                https://accounts.google.com
                                https://oauth2.googleapis.com
                                https://api.twelvedata.com
                                https://api.allorigins.win
                                https://corsproxy.io
+                               https://stooq.com
                                https://query1.finance.yahoo.com;
                    img-src 'self' data:;
                    style-src 'self' 'unsafe-inline'
@@ -190,8 +190,11 @@
                 </div>
             </div>
 
-            <button onclick="fetchLivePrices()" id="btn-live-prices" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-300 border border-emerald-700/50 hover:bg-emerald-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Actualiser crypto/devises automatiquement, puis mise à jour manuelle groupée pour le reste du portefeuille">
+            <button onclick="fetchLivePrices()" id="btn-live-prices" class="px-3 py-1.5 rounded-lg bg-emerald-950/60 text-emerald-300 border border-emerald-700/50 hover:bg-emerald-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Actualiser crypto/devises/actions automatiquement (Or et Argent valorisés automatiquement aussi)">
                 <i class="fa-solid fa-arrows-rotate" id="icon-refresh-prices"></i> Actualiser les cours
+            </button>
+            <button onclick="forceRefreshMetals()" id="btn-refresh-metals" class="px-3 py-1.5 rounded-lg bg-amber-950/60 text-amber-300 border border-amber-700/50 hover:bg-amber-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Forcer la mise à jour des cours Or et Argent (Yahoo GC=F / SI=F, cache 30 min) — valorise toutes les pièces AuCoffre et lingots">
+                <i class="fa-solid fa-coins" id="icon-refresh-metals"></i> Actualiser Or/Argent
             </button>
             <button onclick="refreshRealPriceHistory()" id="btn-refresh-history" class="px-3 py-1.5 rounded-lg bg-teal-950/60 text-teal-300 border border-teal-700/50 hover:bg-teal-900/80 text-xs font-medium transition flex items-center gap-1.5 shadow" title="Télécharger l'historique réel des cours (1 an) pour les cryptos et devises reconnues">
                 <i class="fa-solid fa-chart-line" id="icon-refresh-history"></i> Historique de prix

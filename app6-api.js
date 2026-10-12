@@ -2005,33 +2005,221 @@ async function fetchFinnhubQuote(symbol) {
 }
 
 // =====================================================================
-// AUCOFFRE — Estimation automatique par cours de l'or (Partie 4.3)
+// VALORISATION AUTOMATIQUE DES MÉTAUX PRÉCIEUX (Or / Argent)
+// ---------------------------------------------------------------------
+// Récupère les cours spot via Yahoo Futures :
+//   • GC=F → Or (Gold Futures, USD/oz)
+//   • SI=F → Argent (Silver Futures, USD/oz)
+// Puis convertit en EUR/g et valorise chaque actif Or & Métaux.
+//
+// Sources dans l'ordre :
+//   1. Yahoo Finance via proxy (GC=F / SI=F)
+//   2. Stooq.com (CSV public, pas de CORS)
+//   3. Dernier cours connu en cache localStorage (30 min TTL)
 // =====================================================================
-async function fetchGoldPriceEURPerGram() {
+
+const METALS_CACHE_KEY = 'patriMonial_metalsCache';
+const METALS_CACHE_TTL = 30 * 60 * 1000;   // 30 minutes
+const TROY_OUNCE_IN_GRAMS = 31.1035;       // once troy = 31,1035 g
+
+// --- Récupère le cours d'un symbole Yahoo (GC=F ou SI=F) ---
+async function _fetchYahooMetalPriceUSD(symbol) {
     try {
-        const res = await fetch('https://xaus.com/api/v1/price?currency=EUR&unit=gram');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        return data.price || null;
-    } catch (err) { console.warn('XAUS Gold API failed:', err); return null; }
+        const price = await fetchYahooQuote(symbol);
+        if (Number.isFinite(price) && price > 0) return price;
+    } catch (err) {
+        console.warn(`[Metals] Yahoo ${symbol} échoué :`, err.message);
+    }
+    return null;
 }
 
+// --- Fallback : Stooq.com (CSV public, pas de CORS) ---
+async function _fetchStooqMetalPriceUSD(symbol) {
+    const stooqSymbol = symbol === 'GC=F' ? 'xauusd' : 'xagusd';
+    const url = `https://stooq.com/q/l/?s=${stooqSymbol}&f=sd2t2ohlc&h&e=csv`;
+    const proxied = 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url);
+
+    try {
+        const res = await fetch(proxied);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const csv = await res.text();
+        const lines = csv.trim().split('\n');
+        if (lines.length < 2) throw new Error('CSV vide');
+        const cols = lines[1].split(',');
+        const close = parseFloat(cols[6]);
+        if (Number.isFinite(close) && close > 0) return close;
+    } catch (err) {
+        console.warn(`[Metals] Stooq ${symbol} échoué :`, err.message);
+    }
+    return null;
+}
+
+// --- Récupère le cours Or/Argent en EUR/g (avec cache 30 min) ---
+async function fetchMetalPriceEURPerGram(metal) {
+    const symbol = metal === 'gold' ? 'GC=F' : 'SI=F';
+
+    // 1) Cache localStorage
+    try {
+        const cached = JSON.parse(localStorage.getItem(METALS_CACHE_KEY) || '{}');
+        const entry = cached[metal];
+        if (entry && entry.timestamp && (Date.now() - entry.timestamp) < METALS_CACHE_TTL) {
+            console.info(`[Metals] ${metal} : cache utilisé (${entry.eurPerGram.toFixed(4)} €/g)`);
+            return entry.eurPerGram;
+        }
+    } catch (_) {}
+
+    // 2) Yahoo via proxy
+    let priceUSDPerOZ = await _fetchYahooMetalPriceUSD(symbol);
+
+    // 3) Fallback Stooq
+    if (!priceUSDPerOZ) {
+        console.info(`[Metals] ${metal} : Yahoo échoué, tentative Stooq…`);
+        priceUSDPerOZ = await _fetchStooqMetalPriceUSD(symbol);
+    }
+
+    if (!priceUSDPerOZ) {
+        // 4) Dernier recours : cache expiré
+        try {
+            const cached = JSON.parse(localStorage.getItem(METALS_CACHE_KEY) || '{}');
+            const entry = cached[metal];
+            if (entry && entry.eurPerGram) {
+                console.warn(`[Metals] ${metal} : toutes sources échouées, cache expiré utilisé`);
+                return entry.eurPerGram;
+            }
+        } catch (_) {}
+        return null;
+    }
+
+    // Conversion USD/oz → EUR/g
+    const usdToEur = (typeof getFxRateSync === 'function') ? getFxRateSync('USD') : 0.92;
+    const eurPerGram = (priceUSDPerOZ * usdToEur) / TROY_OUNCE_IN_GRAMS;
+
+    try {
+        const cached = JSON.parse(localStorage.getItem(METALS_CACHE_KEY) || '{}');
+        cached[metal] = { eurPerGram, timestamp: Date.now(), source: 'yahoo' };
+        localStorage.setItem(METALS_CACHE_KEY, JSON.stringify(cached));
+    } catch (_) {}
+
+    console.info(`[Metals] ${metal} : ${priceUSDPerOZ.toFixed(2)} $/oz → ${eurPerGram.toFixed(4)} €/g`);
+    return eurPerGram;
+}
+
+// Compatibilité avec les anciens noms
+async function fetchGoldPriceEURPerGram()   { return fetchMetalPriceEURPerGram('gold'); }
+async function fetchSilverPriceEURPerGram() { return fetchMetalPriceEURPerGram('silver'); }
+
+// --- Détecte le métal d'un actif (or ou argent) ---
+function _detectMetalType(asset) {
+    const name = String(asset.name || '').toLowerCase();
+    const ticker = String(asset.ticker || '').toUpperCase();
+    if (/silver|argent/i.test(name) || /^VS/i.test(ticker) || ticker.includes('SILVER')) {
+        return 'silver';
+    }
+    return 'gold';
+}
+
+// --- Enrichit un asset avec weightGrams / primePct depuis le catalogue ---
+function _enrichAssetFromCatalog(asset) {
+    if (asset.weightGrams && asset.primePct !== undefined) return false;
+
+    const ticker = String(asset.ticker || '').toUpperCase();
+    if (!ticker) return false;
+
+    const catalogItem = (typeof auCoffreCatalog !== 'undefined' ? auCoffreCatalog : [])
+        .find(c => c.ticker.toUpperCase() === ticker);
+
+    if (!catalogItem) return false;
+
+    if (!asset.weightGrams && catalogItem.weightGrams) {
+        asset.weightGrams = catalogItem.weightGrams;
+    }
+    if (asset.primePct === undefined && catalogItem.primePct !== undefined) {
+        asset.primePct = catalogItem.primePct;
+    }
+    return true;
+}
+
+// --- Fonction principale : valorise tous les actifs Or & Métaux ---
 async function updateAuCoffreAssetsFromGoldPrice() {
-    const goldPricePerGram = await fetchGoldPriceEURPerGram();
-    if (!goldPricePerGram) return 0;
+    // Enrichit d'abord les assets legacy
+    let enriched = 0;
+    assets.forEach(a => {
+        if (hasTag(a, 'Or & Métaux') && _enrichAssetFromCatalog(a)) enriched++;
+    });
+
+    const metalAssets = assets.filter(a =>
+        hasTag(a, 'Or & Métaux') &&
+        a.weightGrams &&
+        !a.manualValueOverride
+    );
+
+    if (metalAssets.length === 0) {
+        if (enriched > 0) saveToStorage();
+        return enriched;
+    }
+
+    // Récupère les cours des 2 métaux en parallèle
+    const [goldPrice, silverPrice] = await Promise.all([
+        fetchMetalPriceEURPerGram('gold'),
+        fetchMetalPriceEURPerGram('silver')
+    ]);
+
+    if (!goldPrice && !silverPrice) {
+        console.warn('[Metals] Aucun cours disponible, valorisation annulée');
+        return enriched;
+    }
+
     let updated = 0;
-    const auCoffreAssets = assets.filter(a => hasTag(a, 'Or & Métaux') && a.weightGrams && !a.manualValueOverride);
-    auCoffreAssets.forEach(a => {
-        const estimatedValue = a.qty * a.weightGrams * goldPricePerGram * (1 + (a.primePct || 0));
-        if (Math.abs(estimatedValue - a.value) > 0.01) {
-            a.value = estimatedValue;
-            upsertTodayHistoryPoint(a, a.value, a.invested);
-            updated++;
+    const errors = [];
+
+    metalAssets.forEach(a => {
+        try {
+            const metal = _detectMetalType(a);
+            const pricePerGram = metal === 'silver' ? silverPrice : goldPrice;
+
+            if (!pricePerGram) {
+                errors.push(`${a.name} (${metal} indisponible)`);
+                return;
+            }
+
+            const prime = Number(a.primePct) || 0;
+            const estimatedValue = a.qty * a.weightGrams * pricePerGram * (1 + prime);
+
+            if (Math.abs(estimatedValue - a.value) > 0.5) {
+                const oldValue = a.value;
+                a.value = Math.round(estimatedValue * 100) / 100;
+                upsertTodayHistoryPoint(a, a.value, a.invested);
+                updated++;
+                console.info(`[Metals] ${a.name} : ${oldValue.toFixed(2)} € → ${a.value.toFixed(2)} €`);
+            }
+        } catch (err) {
+            errors.push(`${a.name} : ${err.message}`);
         }
     });
-    if (updated > 0) { saveToStorage(); refreshAllUI(); }
-    return updated;
+
+    if (updated > 0 || enriched > 0) {
+        saveToStorage();
+    }
+
+    if (errors.length > 0) {
+        console.warn('[Metals] Erreurs partielles :\n' + errors.join('\n'));
+    }
+
+    return updated + enriched;
 }
+
+// Force un rafraîchissement (ignore le cache 30 min)
+async function forceRefreshMetals() {
+    try { localStorage.removeItem(METALS_CACHE_KEY); } catch (_) {}
+    const n = await updateAuCoffreAssetsFromGoldPrice();
+    if (n > 0 && typeof refreshAllUI === 'function') refreshAllUI();
+    return n;
+}
+
+// Expose globalement
+window.fetchMetalPriceEURPerGram   = fetchMetalPriceEURPerGram;
+window.fetchSilverPriceEURPerGram  = fetchSilverPriceEURPerGram;
+window.forceRefreshMetals          = forceRefreshMetals;
 
 function openManualGoldUpdate(assetId) {
     const asset = assets.find(a => a.id === assetId);
