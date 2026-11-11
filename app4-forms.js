@@ -196,67 +196,72 @@ function openEditAssetModal(id) {
         }
 
         document.getElementById('add-edit-id').value = asset.id;
-
-    document.getElementById('add-edit-id').value = asset.id;
-    document.getElementById('add-name').value = asset.name;
-    document.getElementById('add-ticker').value = asset.ticker;
-    document.getElementById('add-yahoo-ticker').value = asset.yahooTicker || '';
-    document.getElementById('add-isin').value = asset.isin || '';
-    document.getElementById('add-reference').value = (asset.lots || []).map(l => l.reference).filter(Boolean).join(', ');
-    setFormTags(asset.categories);
-    updateTaxCategoryOptions(asset.taxCategory || 'NON_CONCERNE');
-    document.getElementById('add-cadran').value = asset.cadrans.primary;
-    document.getElementById('add-qty').value = asset.qty;
-    document.getElementById('add-frais').value = asset.frais || 0;
-    document.getElementById('add-value-wrap').classList.remove('hidden');
-    document.getElementById('add-value').setAttribute('required', 'required');
+        document.getElementById('add-name').value = asset.name;
+        document.getElementById('add-ticker').value = asset.ticker;
+        document.getElementById('add-yahoo-ticker').value = asset.yahooTicker || '';
+        document.getElementById('add-isin').value = asset.isin || '';
+        document.getElementById('add-reference').value = (asset.lots || []).map(l => l.reference).filter(Boolean).join(', ');
+        setFormTags(asset.categories);
+        updateTaxCategoryOptions(asset.taxCategory || 'NON_CONCERNE');
+        document.getElementById('add-cadran').value = asset.cadrans.primary;
+        document.getElementById('add-qty').value = asset.qty;
+        document.getElementById('add-frais').value = asset.frais || 0;
+        document.getElementById('add-value-wrap').classList.remove('hidden');
+        document.getElementById('add-value').setAttribute('required', 'required');
         _addValueTouched = true;   // en édition, la valeur existante ne doit pas être écrasée
-    document.getElementById('add-value').value = asset.qty
-        ? (asset.value / asset.qty).toFixed(4)
-        : asset.value;
-    document.getElementById('add-price').value = asset.qty
-        ? ((asset.invested - (asset.frais || 0)) / asset.qty).toFixed(4)
-        : asset.invested;
-    document.getElementById('add-purchase-date').value = asset.purchaseDate || '';
-    setBrokerValue(asset.broker || '');
+        document.getElementById('add-value').value = asset.qty
+            ? (asset.value / asset.qty).toFixed(4)
+            : asset.value;
+        document.getElementById('add-price').value = asset.qty
+            ? ((asset.invested - (asset.frais || 0)) / asset.qty).toFixed(4)
+            : asset.invested;
+        document.getElementById('add-purchase-date').value = asset.purchaseDate || '';
+        setBrokerValue(asset.broker || '');
 
-    document.getElementById('add-valuation-mode').value = asset.valuationMode || 'MANUAL';
-    document.getElementById('add-bond-coupon').value = asset.coupon !== undefined ? (asset.coupon * 100).toFixed(3) : '';
-    document.getElementById('add-bond-maturity').value = asset.maturity || '';
-    document.getElementById('add-bond-rating').value = asset.rating || '';
-    document.getElementById('add-bond-nominal').value = asset.nominal !== undefined ? asset.nominal : 1000;
+        document.getElementById('add-valuation-mode').value = asset.valuationMode || 'MANUAL';
+        document.getElementById('add-bond-coupon').value = asset.coupon !== undefined ? (asset.coupon * 100).toFixed(3) : '';
+        document.getElementById('add-bond-maturity').value = asset.maturity || '';
+        document.getElementById('add-bond-rating').value = asset.rating || '';
+        document.getElementById('add-bond-nominal').value = asset.nominal !== undefined ? asset.nominal : 1000;
 
-    updateAssetFormSections(asset.envelope);
-    document.getElementById('add-envelope-date').value = asset.envelopeOpenedAt || '';
-    document.getElementById('add-zone').value = asset.zone || 'UE';
-    updateEnvelopeDetails();
+        updateAssetFormSections(asset.envelope);
+        document.getElementById('add-envelope-date').value = asset.envelopeOpenedAt || '';
+        document.getElementById('add-zone').value = asset.zone || 'UE';
+        updateEnvelopeDetails();
 
-    // Devise — restaure la devise et le taux d'achat (Chantier 1.2)
-    const curSel = document.getElementById('add-currency');
-    if (curSel) curSel.value = asset.currency || 'EUR';
-    const fxInput = document.getElementById('add-fx-rate');
-    if (fxInput) {
-        // En édition, on pré-remplit avec la valeur stockée SANS lancer de fetch
-        fxInput.value = asset.fxRateAtPurchase ? asset.fxRateAtPurchase.toFixed(6) : '';
+        // Devise — restaure la devise et le taux d'achat (Chantier 1.2)
+        const curSel = document.getElementById('add-currency');
+        if (curSel) curSel.value = asset.currency || 'EUR';
+        const fxInput = document.getElementById('add-fx-rate');
+        if (fxInput) {
+            // En édition, on pré-remplit avec la valeur stockée SANS lancer de fetch
+            fxInput.value = asset.fxRateAtPurchase ? asset.fxRateAtPurchase.toFixed(6) : '';
+        }
+        // Marque comme "touche" pour empêcher un fetch automatique d'écraser la valeur
+        _addFxRateTouched = !!(asset.fxRateAtPurchase);
+        onCurrencyChange();
+
+        // Score ESG — préremplit avec la valeur stockée (Chantier §3)
+        const esgInput = document.getElementById('add-esg-score');
+        if (esgInput) {
+            esgInput.value = Number.isFinite(asset.esgScore) ? asset.esgScore : '';
+        }
+        updateEsgPreview();
+
+        document.getElementById('modal-add-asset-title').innerHTML = '<i class="fa-solid fa-pen text-emerald-400"></i> Modifier l\'Actif';
+        document.getElementById('modal-add-asset-submit-btn').innerText = 'Enregistrer les Modifications';
+        document.getElementById('search-results-container').classList.add('hidden');
+        document.getElementById('add-search-input').value = '';
+        
+        // Force le recalcul du coût total après restauration des valeurs
+        if (typeof recalculateTotalCost === 'function') recalculateTotalCost();
+        
+        document.getElementById('modal-add-asset').classList.remove('hidden');
+
+    } catch (err) {
+        console.error("Erreur d'édition de l'actif :", err);
+        alert("Impossible d'ouvrir l'éditeur : " + err.message);
     }
-    // Marque comme "touche" pour empêcher un fetch automatique d'écraser la valeur
-    _addFxRateTouched = !!(asset.fxRateAtPurchase);
-    onCurrencyChange();
-
-    // Score ESG — préremplit avec la valeur stockée (Chantier §3)
-    const esgInput = document.getElementById('add-esg-score');
-    if (esgInput) {
-        esgInput.value = Number.isFinite(asset.esgScore) ? asset.esgScore : '';
-    }
-    updateEsgPreview();
-
-    document.getElementById('modal-add-asset-title').innerHTML = '<i class="fa-solid fa-pen text-emerald-400"></i> Modifier l\'Actif';
-    document.getElementById('modal-add-asset-submit-btn').innerText = 'Enregistrer les Modifications';
-    document.getElementById('search-results-container').classList.add('hidden');
-    document.getElementById('add-search-input').value = '';
-    // Force le recalcul du coût total après restauration des valeurs
-    if (typeof recalculateTotalCost === 'function') recalculateTotalCost();
-    document.getElementById('modal-add-asset').classList.remove('hidden');
 }
 
 // ---------------------------------------------------------------------
