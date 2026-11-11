@@ -1281,8 +1281,8 @@ async function fetchLivePrices() {
 
     // --- Pièces AuCoffre ---
     try {
-        const auCoffreUpdated = await updateAuCoffreAssetsFromGoldPrice();
-        if (auCoffreUpdated > 0) updated += auCoffreUpdated;
+        const metalResult = await updateAuCoffreAssetsFromGoldPrice();
+        if (metalResult.updated > 0) updated += metalResult.updated;
     } catch (err) { console.warn('AuCoffre update failed:', err); }
 
     if (updated > 0) {
@@ -2347,7 +2347,7 @@ async function updateAuCoffreAssetsFromGoldPrice() {
 
     if (metalAssets.length === 0) {
         if (enriched > 0) saveToStorage();
-        return enriched;
+        return { updated: 0, enriched, error: enriched > 0 ? null : 'Aucun actif Or/Argent avec poids connu.' };
     }
 
     // Récupère les cours des 2 métaux en parallèle
@@ -2357,77 +2357,63 @@ async function updateAuCoffreAssetsFromGoldPrice() {
     ]);
 
     if (!goldPrice && !silverPrice) {
-        console.warn('[Metals] Aucun cours disponible, valorisation annulée');
-        return enriched;
+        console.warn('[Metals] Aucun cours disponible (API Yahoo/Stooq en échec)');
+        return { updated: 0, enriched, error: 'Cours de l\'or/argent indisponible (API en échec).' };
     }
 
     let updated = 0;
-    const errors = [];
-
     metalAssets.forEach(a => {
         try {
             const metal = _detectMetalType(a);
             const pricePerGram = metal === 'silver' ? silverPrice : goldPrice;
 
-            if (!pricePerGram) {
-                errors.push(`${a.name} (${metal} indisponible)`);
-                return;
-            }
+            if (!pricePerGram) return;
 
             const prime = Number(a.primePct) || 0;
             const estimatedValue = a.qty * a.weightGrams * pricePerGram * (1 + prime);
 
             if (Math.abs(estimatedValue - a.value) > 0.5) {
-                const oldValue = a.value;
                 a.value = Math.round(estimatedValue * 100) / 100;
                 upsertTodayHistoryPoint(a, a.value, a.invested);
                 updated++;
-                console.info(`[Metals] ${a.name} : ${oldValue.toFixed(2)} € → ${a.value.toFixed(2)} €`);
             }
         } catch (err) {
-            errors.push(`${a.name} : ${err.message}`);
+            console.warn(`[Metals] Erreur sur ${a.name} :`, err);
         }
     });
 
-    if (updated > 0 || enriched > 0) {
-        saveToStorage();
-    }
+    if (updated > 0 || enriched > 0) saveToStorage();
 
-    if (errors.length > 0) {
-        console.warn('[Metals] Erreurs partielles :\n' + errors.join('\n'));
-    }
-
-    return updated + enriched;
+    return { updated, enriched, error: null };
 }
 
 // Force un rafraîchissement (ignore le cache 30 min)
 async function forceRefreshMetals() {
+    if (window._metalsRefreshInProgress) return;
+    window._metalsRefreshInProgress = true;
+
     const btn  = document.getElementById('btn-refresh-metals');
     const icon = document.getElementById('icon-refresh-metals');
     
-    // 1) On active le spinner visuel
     if (icon) icon.classList.add('fa-spin');
     if (btn)  btn.disabled = true;
 
     try { localStorage.removeItem(METALS_CACHE_KEY); } catch (_) {}
     
-    // 2) On attend la fin de la mise à jour
-    const n = await updateAuCoffreAssetsFromGoldPrice();
+    const result = await updateAuCoffreAssetsFromGoldPrice();
     
-    if (n > 0 && typeof refreshAllUI === 'function') refreshAllUI();
-
-    // 3) Feedback à l'utilisateur
-    if (n > 0 && typeof toastSuccess === 'function') {
-        toastSuccess('Or & Argent', `${n} actif(s) valorisé(s).`);
-    } else if (n === 0 && typeof toastWarning === 'function') {
-        toastWarning('Or & Argent', 'Aucun actif mis à jour. Vérifiez que vos pièces ont bien un "poids" dans le catalogue.');
+    if (result.error) {
+        if (typeof toastError === 'function') toastError('Or & Argent', result.error);
+    } else if (result.updated > 0) {
+        if (typeof refreshAllUI === 'function') refreshAllUI();
+        if (typeof toastSuccess === 'function') toastSuccess('Or & Argent', `${result.updated} actif(s) valorisé(s).`);
+    } else {
+        if (typeof toastInfo === 'function') toastInfo('Or & Argent', 'Cours inchangés (ou pas de variation détectée).');
     }
 
-    // 4) On coupe le spinner visuel
     if (icon) icon.classList.remove('fa-spin');
     if (btn)  btn.disabled = false;
-    
-    return n;
+    window._metalsRefreshInProgress = false;
 }
 
 // Expose globalement
