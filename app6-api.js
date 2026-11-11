@@ -162,10 +162,6 @@ async function _fetchViaProxy(url, timeoutMs = 5000) {
 //   fournisseur de données. On teste une courte liste de variantes
 //   en cascade si le symbole principal échoue.
 const YAHOO_TICKER_FALLBACKS = {
-    // iShares Core MSCI Europe (ISIN IE00B5L8K969)
-    'CEU.PA': ['C40.PA', 'SXR7.DE', 'IMEU.L', 'IEU.L'],
-    'SXR7.DE': ['CEU.PA', 'IMEU.L'],
-    'IMEU.L':  ['IEU.L', 'CEU.PA'],
     // --- Or / Argent physique ---
     'IGLN.L':  ['SGLN.L', 'IGLN.AS', 'PPFD.AS'],
     'ISLN.L':  ['SSLN.L', 'ISLN.AS'],
@@ -2847,7 +2843,6 @@ async function applyCompaction() {
 window.onCompactionYearsChange = onCompactionYearsChange;
 window.refreshCompactionPreview = refreshCompactionPreview;
 window.applyCompaction = applyCompaction;
-
 
 
 // =====================================================================

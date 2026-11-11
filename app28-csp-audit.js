@@ -504,16 +504,11 @@ function enableCspFallbackDelegator() {
     });
 
     _cspDelegatorActive = true;
-    console.info('%c[CSP Delegator] ACTIVÉ — les handlers inline sont maintenant rejoués par le délégateur. Vous pouvez retirer \'unsafe-inline\' de la CSP.',
+    console.info('%c[CSP Delegator] ACTIVÉ — les handlers inline sont maintenant rejoués par le délégateur.',
         'color: #10b981; font-weight: bold;');
 
-    if (typeof toastInfo === 'function') {
-        toastInfo(
-            'Délégateur CSP activé',
-            'Testez l\'app pour vérifier que tous les handlers fonctionnent. Si OK, retirez \'unsafe-inline\' de la CSP.',
-            { duration: 8000 }
-        );
-    }
+    // Note : le toast d'information a été retiré en production.
+    // Le délégateur est maintenant une brique permanente de l'app (CSP durcie).
 }
 
 // Désactive le délégateur
