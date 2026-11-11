@@ -2276,15 +2276,45 @@ function _detectMetalType(asset) {
 
 // --- Enrichit un asset avec weightGrams / primePct depuis le catalogue ---
 function _enrichAssetFromCatalog(asset) {
+    // Si on a déjà le poids, pas besoin de chercher
     if (asset.weightGrams && asset.primePct !== undefined) return false;
 
-    const ticker = String(asset.ticker || '').toUpperCase();
-    if (!ticker) return false;
+    // On nettoie le ticker (on enlève les espaces et caractères spéciaux)
+    const ticker = String(asset.ticker || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const name = String(asset.name || '').toLowerCase();
+    if (!ticker && !name) return false;
 
-    const catalogItem = (typeof auCoffreCatalog !== 'undefined' ? auCoffreCatalog : [])
-        .find(c => c.ticker.toUpperCase() === ticker);
+    const catalog = (typeof auCoffreCatalog !== 'undefined' ? auCoffreCatalog : []);
+    
+    // 1) Recherche par ticker (nettoyé)
+    let catalogItem = catalog.find(c => 
+        c.ticker.toUpperCase().replace(/[^A-Z0-9]/g, '') === ticker
+    );
 
-    if (!catalogItem) return false;
+    // 2) Si échec, recherche par nom (ex: "Vera Valor 1/10" reconnaîtra "Vera Valor 1/10 Ounce Gold")
+    if (!catalogItem) {
+        catalogItem = catalog.find(c => {
+            const catName = c.name.toLowerCase();
+            return name.includes(catName) || catName.includes(name);
+        });
+    }
+
+    // 3) Si on a toujours rien trouvé, on tente une extraction via expression régulière
+    if (!catalogItem) {
+        let guessedWeight = 0;
+        if (name.includes('1 once') || name.includes('1oz') || name.includes('1 oz')) guessedWeight = 31.10;
+        else if (name.includes('1/2')) guessedWeight = 15.55;
+        else if (name.includes('1/4')) guessedWeight = 7.78;
+        else if (name.includes('1/10')) guessedWeight = 3.11;
+        else if (name.includes('1/20')) guessedWeight = 1.58;
+
+        if (guessedWeight > 0) {
+            if (!asset.weightGrams) asset.weightGrams = guessedWeight;
+            if (asset.primePct === undefined) asset.primePct = 0.02; // Prime par défaut 2%
+            return true;
+        }
+        return false;
+    }
 
     if (!asset.weightGrams && catalogItem.weightGrams) {
         asset.weightGrams = catalogItem.weightGrams;
@@ -2308,6 +2338,12 @@ async function updateAuCoffreAssetsFromGoldPrice() {
         a.weightGrams &&
         !a.manualValueOverride
     );
+
+    // Log si des actifs Or sont ignorés faute de poids
+    const ignoredAssets = assets.filter(a => hasTag(a, 'Or & Métaux') && !a.weightGrams && !a.manualValueOverride);
+    if (ignoredAssets.length > 0) {
+        console.warn(`[Metals] ${ignoredAssets.length} actif(s) ignoré(s) faute de poids connu :`, ignoredAssets.map(a => a.name).join(', '));
+    }
 
     if (metalAssets.length === 0) {
         if (enriched > 0) saveToStorage();
@@ -2366,9 +2402,31 @@ async function updateAuCoffreAssetsFromGoldPrice() {
 
 // Force un rafraîchissement (ignore le cache 30 min)
 async function forceRefreshMetals() {
+    const btn  = document.getElementById('btn-refresh-metals');
+    const icon = document.getElementById('icon-refresh-metals');
+    
+    // 1) On active le spinner visuel
+    if (icon) icon.classList.add('fa-spin');
+    if (btn)  btn.disabled = true;
+
     try { localStorage.removeItem(METALS_CACHE_KEY); } catch (_) {}
+    
+    // 2) On attend la fin de la mise à jour
     const n = await updateAuCoffreAssetsFromGoldPrice();
+    
     if (n > 0 && typeof refreshAllUI === 'function') refreshAllUI();
+
+    // 3) Feedback à l'utilisateur
+    if (n > 0 && typeof toastSuccess === 'function') {
+        toastSuccess('Or & Argent', `${n} actif(s) valorisé(s).`);
+    } else if (n === 0 && typeof toastWarning === 'function') {
+        toastWarning('Or & Argent', 'Aucun actif mis à jour. Vérifiez que vos pièces ont bien un "poids" dans le catalogue.');
+    }
+
+    // 4) On coupe le spinner visuel
+    if (icon) icon.classList.remove('fa-spin');
+    if (btn)  btn.disabled = false;
+    
     return n;
 }
 
