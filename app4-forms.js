@@ -185,9 +185,15 @@ function openAddAssetModal() {
 // ---------------------------------------------------------------------
 function openEditAssetModal(id) {
     try {
+        if (id === undefined || id === null || id === '') {
+            console.warn("[EditAsset] ID manquant");
+            alert("Erreur : Impossible de trouver cet actif. Veuillez rafraîchir la page.");
+            return;
+        }
         // Sécurité : on s'assure que l'ID est bien un nombre
         const numericId = typeof id === 'string' ? parseFloat(id) : id;
-        const asset = assets.find(a => a.id === numericId);
+        // Comparaison string pour éviter tout problème de typage
+        const asset = assets.find(a => String(a.id) === String(numericId));
         
         if (!asset) {
             console.warn("[EditAsset] Actif introuvable pour l'ID:", id);
@@ -209,12 +215,15 @@ function openEditAssetModal(id) {
         document.getElementById('add-value-wrap').classList.remove('hidden');
         document.getElementById('add-value').setAttribute('required', 'required');
         _addValueTouched = true;   // en édition, la valeur existante ne doit pas être écrasée
-        document.getElementById('add-value').value = asset.qty
-            ? (asset.value / asset.qty).toFixed(4)
-            : asset.value;
-        document.getElementById('add-price').value = asset.qty
-            ? ((asset.invested - (asset.frais || 0)) / asset.qty).toFixed(4)
-            : asset.invested;
+        
+        // Sécurité : conversion en nombre pour éviter les crashs .toFixed() sur undefined
+        const qty = Number(asset.qty) || 0;
+        const val = Number(asset.value) || 0;
+        const inv = Number(asset.invested) || 0;
+        const frais = Number(asset.frais) || 0;
+
+        document.getElementById('add-value').value = qty > 0 ? (val / qty).toFixed(4) : val;
+        document.getElementById('add-price').value = qty > 0 ? ((inv - frais) / qty).toFixed(4) : inv;
         document.getElementById('add-purchase-date').value = asset.purchaseDate || '';
         setBrokerValue(asset.broker || '');
 
@@ -814,6 +823,7 @@ async function triggerAssetSearch() {
             isinResult.badge = 'ISIN générique';
             isinResult._resolving = false;
         }
+    }
     }
 
     // 1) Catalogue AuCoffre
