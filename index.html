@@ -297,7 +297,7 @@
     <div class="flex flex-col lg:flex-row gap-6 flex-grow">
 
         <!-- NAVIGATION TABS VERTICALE -->
-        <nav class="flex flex-col gap-1 lg:w-56 shrink-0 border-b lg:border-b-0 lg:border-r border-gray-800 pb-4 lg:pb-0 lg:pr-4 mb-2 lg:mb-0 text-sm">
+        <nav id="legacy-tab-nav" class="flex flex-col gap-1 lg:w-56 shrink-0 border-b lg:border-b-0 lg:border-r border-gray-800 pb-4 lg:pb-0 lg:pr-4 mb-2 lg:mb-0 text-sm">
             <button onclick="switchTab('tab-accueil')" id="btn-tab-accueil" class="nav-tab active py-2.5 px-3 rounded-lg flex items-center gap-2.5 whitespace-nowrap text-gray-400 hover:text-gray-200 hover:bg-gray-800/50 text-left w-full transition">
                 <i class="fa-solid fa-house w-5 text-center"></i> Accueil
             </button>
@@ -3854,7 +3854,7 @@
                 </div>
                 <div class="flex items-center gap-2">
                     <button onclick="openSplitModal(currentAssetDetailId)" class="w-8 h-8 rounded-lg bg-gray-800 text-gray-400 hover:text-cyan-400" title="Enregistrer un split ou reverse split (neutre fiscalement)"><i class="fa-solid fa-scissors"></i></button>
-                    <button id="modal-asset-edit-btn" onclick="openEditAssetModal(currentAssetDetailId); closeModal('modal-asset-detail');" class="w-8 h-8 rounded-lg bg-gray-800 text-gray-400 hover:text-indigo-400"><i class="fa-solid fa-pen"></i></button>
+                    <button id="modal-asset-edit-btn" onclick="openEditAssetModal(window.currentAssetDetailId); closeModal('modal-asset-detail');" class="w-8 h-8 rounded-lg bg-gray-800 text-gray-400 hover:text-indigo-400"><i class="fa-solid fa-pen"></i></button>
                     <button onclick="closeModal('modal-asset-detail')" class="w-8 h-8 rounded-lg bg-gray-800 text-gray-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
                 </div>
             </div>
