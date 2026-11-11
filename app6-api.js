@@ -2848,53 +2848,6 @@ window.onCompactionYearsChange = onCompactionYearsChange;
 window.refreshCompactionPreview = refreshCompactionPreview;
 window.applyCompaction = applyCompaction;
 
-// =====================================================================
-// RÉSOLUTION ISIN → TICKER YAHOO (fix 2026)
-// =====================================================================
-const OPENFIGI_TO_YAHOO_SUFFIX = {
-    FP: '.PA', GR: '.DE', GY: '.DE', LN: '.L', NA: '.AS', SM: '.MC',
-    IM: '.MI', SW: '.SW', BB: '.BR', MU: '.MU', US: '', UW: '', UN: '', UQ: '', UA: '', UR: ''
-};
-const OPENFIGI_PRIORITY = ['FP', 'GR', 'GY', 'LN', 'NA', 'IM', 'SM', 'BB', 'MU', 'US', 'UW', 'UN', 'UQ', 'UA', 'UR'];
-
-async function resolveIsinToYahooTicker(isin) {
-    if (!/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/i.test(isin)) return null;
-    const upperIsin = isin.toUpperCase();
-
-    try {
-        const res = await fetch('https://api.openfigi.com/v3/mapping', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify([{ idType: 'ID_ISIN', idValue: upperIsin }])
-        });
-        if (res.ok) {
-            const data = await res.json();
-            const items = (data && data[0] && data[0].data) || [];
-            if (items.length > 0) {
-                items.sort((a, b) => {
-                    const ia = OPENFIGI_PRIORITY.indexOf(a.exchCode);
-                    const ib = OPENFIGI_PRIORITY.indexOf(b.exchCode);
-                    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-                });
-                const best = items[0];
-                const suffix = OPENFIGI_TO_YAHOO_SUFFIX[best.exchCode];
-                const yahooTicker = suffix !== undefined ? (best.ticker + suffix) : (best.ticker || '');
-                
-                return {
-                    name: best.name || `Actif ISIN ${upperIsin}`,
-                    ticker: best.ticker || upperIsin.slice(0, 6),
-                    yahooTicker: yahooTicker,
-                    isin: upperIsin,
-                    exchange: best.exchCode || '',
-                    source: 'OpenFIGI'
-                };
-            }
-        }
-    } catch (err) { console.warn('[ISIN] OpenFIGI échoué :', err.message); }
-
-    return null;
-}
-window.resolveIsinToYahooTicker = resolveIsinToYahooTicker;
 
 
 // =====================================================================
