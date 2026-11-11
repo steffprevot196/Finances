@@ -184,8 +184,18 @@ function openAddAssetModal() {
 // Ouverture du formulaire d'édition
 // ---------------------------------------------------------------------
 function openEditAssetModal(id) {
-    const asset = assets.find(a => a.id === id);
-    if (!asset) return;
+    try {
+        // Sécurité : on s'assure que l'ID est bien un nombre
+        const numericId = typeof id === 'string' ? parseFloat(id) : id;
+        const asset = assets.find(a => a.id === numericId);
+        
+        if (!asset) {
+            console.warn("[EditAsset] Actif introuvable pour l'ID:", id);
+            alert("Erreur : Impossible de trouver cet actif. Veuillez rafraîchir la page.");
+            return;
+        }
+
+        document.getElementById('add-edit-id').value = asset.id;
 
     document.getElementById('add-edit-id').value = asset.id;
     document.getElementById('add-name').value = asset.name;
