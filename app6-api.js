@@ -116,9 +116,14 @@ function saveTwelveDataKey() {
 // L'API Yahoo Finance ne renvoie pas d'en-tête CORS, il faut donc passer
 // par un proxy. On utilise une liste ordonnée : si le premier échoue
 // (timeout, 5xx, blocage réseau), on essaie le suivant.
+// Proxies CORS publics pour Yahoo Finance (liste ordonnée, cascade).
+// ⚠ Février 2026 : corsproxy.io est devenu payant (HTTP 401 partout).
+// → Remplacé par codetabs.com (gratuit, stable, ~1 req/s).
+// ⚠ allorigins.win est très instable : timeout par défaut à 12 s.
 const YAHOO_PROXIES = [
-    { name: 'allorigins.win', prefix: 'https://api.allorigins.win/raw?url=' },
-    { name: 'corsproxy.io',   prefix: 'https://corsproxy.io/?url=' }
+    { name: 'codetabs.com',   prefix: 'https://api.codetabs.com/v1/proxy?quest=', timeout: 9000  },
+    { name: 'allorigins.win', prefix: 'https://api.allorigins.win/raw?url=',      timeout: 12000 },
+    { name: 'corsproxy.io',   prefix: 'https://corsproxy.io/?url=',               timeout: 5000  }  // conservé (peut échouer 401)
 ];
 
 function yahooChartUrl(symbol, range) {
@@ -130,12 +135,18 @@ function yahooChartUrl(symbol, range) {
 async function _fetchViaProxy(url, timeoutMs = 5000) {
     for (const proxy of YAHOO_PROXIES) {
         const proxiedUrl = proxy.prefix + encodeURIComponent(url);
+        const effectiveTimeout = proxy.timeout || timeoutMs;
         try {
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), timeoutMs);
+            const timer = setTimeout(() => controller.abort(), effectiveTimeout);
             const res = await fetch(proxiedUrl, { signal: controller.signal });
             clearTimeout(timer);
 
+            // 401 = proxy devenu payant (corsproxy.io) → log discret, on saute
+            if (res.status === 401) {
+                console.info(`[Yahoo] ${proxy.name} → 401 (proxy payant, on saute)`);
+                continue;
+            }
             if (!res.ok) {
                 console.warn(`[Yahoo] ${proxy.name} → HTTP ${res.status}`);
                 continue;
@@ -162,10 +173,6 @@ async function _fetchViaProxy(url, timeoutMs = 5000) {
 //   fournisseur de données. On teste une courte liste de variantes
 //   en cascade si le symbole principal échoue.
 const YAHOO_TICKER_FALLBACKS = {
-    // iShares Core MSCI Europe (ISIN IE00B5L8K969)
-    'CEU.PA': ['C40.PA', 'SXR7.DE', 'IMEU.L', 'IEU.L'],
-    'SXR7.DE': ['CEU.PA', 'IMEU.L'],
-    'IMEU.L':  ['IEU.L', 'CEU.PA'],
     // --- Or / Argent physique ---
     'IGLN.L':  ['SGLN.L', 'IGLN.AS', 'PPFD.AS'],
     'ISLN.L':  ['SSLN.L', 'ISLN.AS'],
@@ -1076,8 +1083,14 @@ async function _fetchWithRetry(url, options = {}, maxRetries = 3) {
             return res;
         } catch (err) {
             lastErr = err;
+            // CoinGecko renvoie parfois 429 SANS header CORS → le navigateur
+            // lève "TypeError: Failed to fetch" au lieu de "429". On le traite
+            // comme un rate-limit pour que le backoff soit plus long.
+            const isCorsLike = /Failed to fetch|NetworkError|CORS/i.test(err.message || '');
             if (attempt < maxRetries - 1) {
-                const waitMs = Math.pow(2, attempt) * 1000 + Math.random() * 500;
+                const base = isCorsLike ? 4000 : 1000;
+                const waitMs = Math.pow(2, attempt) * base + Math.random() * 500;
+                console.warn(`[Fetch] Retry ${attempt + 1}/${maxRetries} dans ${Math.round(waitMs)}ms (${err.message})`);
                 await new Promise(r => setTimeout(r, waitMs));
             }
         }
@@ -2847,7 +2860,6 @@ async function applyCompaction() {
 window.onCompactionYearsChange = onCompactionYearsChange;
 window.refreshCompactionPreview = refreshCompactionPreview;
 window.applyCompaction = applyCompaction;
-
 
 
 // =====================================================================
