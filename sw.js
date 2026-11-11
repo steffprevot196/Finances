@@ -15,7 +15,7 @@
 // « fantômes » impossibles à reproduire en DevTools.
 // =====================================================================
 
-const SW_VERSION = 'v1.0.28';                   // ← Bumper à chaque deploy
+const SW_VERSION = 'v1.0.29';                   // ← Bumper à chaque deploy
 const CACHE_PREFIX = 'patrimonial';
 const CACHE_STATIC = `${CACHE_PREFIX}-static-${SW_VERSION}`;
 const CACHE_CDN    = `${CACHE_PREFIX}-cdn-${SW_VERSION}`;
@@ -119,6 +119,10 @@ const NEVER_CACHE_PATTERNS = [
     /xaus\.com/,
     /api\.twelvedata\.com/,
     /api\.allorigins\.win/,
+    /api\.codetabs\.com/,
+    /corsproxy\.io/,
+    /\.workers\.dev/,              // ← Votre Worker Cloudflare
+    /stooq\.com/,
     /googleapis\.com/,
     /accounts\.google\.com/,
     /oauth2\.googleapis\.com/,

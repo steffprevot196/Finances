@@ -121,9 +121,11 @@ function saveTwelveDataKey() {
 // → Remplacé par codetabs.com (gratuit, stable, ~1 req/s).
 // ⚠ allorigins.win est très instable : timeout par défaut à 12 s.
 const YAHOO_PROXIES = [
-    { name: 'codetabs.com',   prefix: 'https://api.codetabs.com/v1/proxy?quest=', timeout: 9000  },
-    { name: 'allorigins.win', prefix: 'https://api.allorigins.win/raw?url=',      timeout: 12000 },
-    { name: 'corsproxy.io',   prefix: 'https://corsproxy.io/?url=',               timeout: 5000  }  // conservé (peut échouer 401)
+    // ✅ VOTRE WORKER CLOUDFLARE (100% fiable)
+    { name: 'cloudflare-worker', prefix: 'https://patrimonial-proxy.steffprevot196.workers.dev/?url=', timeout: 15000 },
+    // Fallbacks publics (au cas où le worker tomberait)
+    { name: 'codetabs.com',   prefix: 'https://api.codetabs.com/v1/proxy?quest=', timeout: 8000  },
+    { name: 'allorigins.win', prefix: 'https://api.allorigins.win/raw?url=',      timeout: 8000  }
 ];
 
 function yahooChartUrl(symbol, range) {
