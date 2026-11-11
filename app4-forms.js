@@ -3139,3 +3139,46 @@ function deleteSplit(assetId, splitId) {
         if (refreshed) renderAssetLotsTable(refreshed);
     }
 }
+
+// ---------------------------------------------------------------------
+// BOUTON « MODIFIER » DE LA FICHE ACTIF — robuste
+// ---------------------------------------------------------------------
+// Problèmes corrigés :
+//  1) window.currentAssetDetailId peut être remis à null (closeModal, etc.)
+//     avant qu'un second déclenchement du handler ne s'exécute
+//     (le délégateur CSP rejoue les handlers inline) → « ID manquant ».
+//  2) On mémorise donc le dernier actif ouvert dans la fiche, et on ignore
+//     les appels répétés dans un court laps de temps.
+var _lastAssetDetailOpenedId = null;
+var _editCurrentAssetLastCall = 0;
+
+(function _trackAssetDetailId() {
+    const orig = window.openAssetDetailModal;
+    if (typeof orig !== 'function' || orig._idTracked) return;
+    const wrapped = function (...args) {
+        if (args[0] !== undefined && args[0] !== null && args[0] !== '') {
+            _lastAssetDetailOpenedId = args[0];
+        }
+        return orig.apply(this, args);
+    };
+    wrapped._idTracked = true;
+    wrapped._originalFn = orig._originalFn || orig;
+    // Conserve les marqueurs posés par les autres hooks (slide panel, thèse)
+    Object.keys(orig).forEach(k => { wrapped[k] = orig[k]; });
+    window.openAssetDetailModal = wrapped;
+})();
+
+function editCurrentAsset() {
+    const now = Date.now();
+    if (now - _editCurrentAssetLastCall < 600) return;   // anti double-déclenchement
+    _editCurrentAssetLastCall = now;
+
+    let id = window.currentAssetDetailId;
+    if (id === undefined || id === null || id === '') id = _lastAssetDetailOpenedId;
+    if (id === undefined || id === null || id === '') {
+        console.warn('[EditAsset] Aucun actif ouvert dans la fiche');
+        return;
+    }
+    openEditAssetModal(id);
+    if (typeof closeModal === 'function') closeModal('modal-asset-detail');
+}
