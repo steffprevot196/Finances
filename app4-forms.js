@@ -743,6 +743,61 @@ async function triggerAssetSearch() {
 
     const results = [];
 
+    // ⭐ FIX 2026 : si la requête est un ISIN valide, on ajoute immédiatement
+    // un résultat provisoire "Recherche en cours…", puis on lance la
+    // résolution automatique ISIN → Ticker Yahoo (OpenFIGI/Twelve Data).
+    const isinRegex = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/i;
+    if (isinRegex.test(query)) {
+        const upperIsin = query.toUpperCase();
+        const isinResult = {
+            type: 'isin-generic',
+            badge: 'Recherche en cours…',
+            badgeColor: 'bg-amber-950 text-amber-300 border-amber-800/50',
+            name: `Actif ISIN ${upperIsin}`,
+            ticker: upperIsin.slice(0, 6),
+            yahooTicker: '',
+            isin: upperIsin,
+            category: 'Actions/ETF',
+            cadran: 'ASIE',
+            taxCategory: 'NON_CONCERNE',
+            priceEUR: 0,
+            _resolving: true,
+            _resolved: false
+        };
+        results.push(isinResult);
+
+        if (typeof resolveIsinToYahooTicker === 'function') {
+            resolveIsinToYahooTicker(upperIsin).then(resolved => {
+                const currentQuery = (document.getElementById('add-search-input')?.value || '').trim().toUpperCase();
+                if (currentQuery !== upperIsin) return;
+
+                if (resolved) {
+                    isinResult.name        = resolved.name;
+                    isinResult.ticker      = resolved.ticker;
+                    isinResult.yahooTicker = resolved.yahooTicker;
+                    isinResult.exchange    = resolved.exchange;
+                    isinResult.badge       = resolved.source + (resolved.exchange ? ' · ' + resolved.exchange : '');
+                    isinResult.badgeColor  = 'bg-emerald-950 text-emerald-300 border-emerald-800/50';
+                    isinResult._resolved   = true;
+                    console.info(`[Search] ISIN ${upperIsin} résolu : ${resolved.name} (${resolved.yahooTicker})`);
+                } else {
+                    isinResult.badge       = 'ISIN générique (non résolu)';
+                    isinResult.badgeColor  = 'bg-amber-950 text-amber-300 border-amber-800/50';
+                }
+                isinResult._resolving = false;
+                renderSearchResults(results);
+            }).catch(err => {
+                console.warn('[Search] Résolution ISIN échouée :', err);
+                isinResult.badge = 'ISIN générique';
+                isinResult._resolving = false;
+                renderSearchResults(results);
+            });
+        } else {
+            isinResult.badge = 'ISIN générique';
+            isinResult._resolving = false;
+        }
+    }
+
     // 1) Catalogue AuCoffre
     auCoffreCatalog.forEach(c => {
         if (c.name.toLowerCase().includes(qLower) || c.ticker.toLowerCase().includes(qLower) || (c.isin || '').toLowerCase().includes(qLower)) {
@@ -762,43 +817,43 @@ async function triggerAssetSearch() {
         }
     });
 
-        // 2) Catalogue Actions / ETF / Forex
-        popularMarketAssets.forEach(m => {
-            if (m.name.toLowerCase().includes(qLower) || m.ticker.toLowerCase().includes(qLower) || (m.isin || '').toLowerCase().includes(qLower)) {
-                results.push({
-                    type: 'market',
-                    badge: m.category === 'Devises/Liquidités' ? 'Devise / Forex' : 'Action / ETF',
-                    badgeColor: m.category === 'Devises/Liquidités'
-                        ? 'bg-blue-950 text-blue-300 border-blue-800/50'
-                        : 'bg-indigo-950 text-indigo-300 border-indigo-800/50',
-                    name: m.name,
-                    ticker: m.ticker,
-                    category: m.category,
-                    cadran: m.cadran,
-                    taxCategory: m.taxCategory || 'NON_CONCERNE',
-                    priceEUR: m.basePriceEUR
-                });
-            }
-        });
-    
-        // 2bis) Catalogue Crypto (Correction 4)
-        cryptoCatalog.forEach(c => {
-            if (c.name.toLowerCase().includes(qLower) || c.ticker.toLowerCase().includes(qLower) || (c.isin || '').toLowerCase().includes(qLower)) {
-                results.push({
-                    type: 'crypto',
-                    badge: 'Crypto',
-                    badgeColor: 'bg-purple-950 text-purple-300 border-purple-800/50',
-                    name: c.name,
-                    ticker: c.ticker,
-                    tags: ['Crypto'],
-                    cadran: 'CRYPTO',
-                    taxCategory: 'NON_CONCERNE',
-                    priceEUR: c.basePriceEUR
-                });
-            }
-        });
-    
-        // 3) Détection directe des devises courantes
+    // 2) Catalogue Actions / ETF / Forex
+    popularMarketAssets.forEach(m => {
+        if (m.name.toLowerCase().includes(qLower) || m.ticker.toLowerCase().includes(qLower) || (m.isin || '').toLowerCase().includes(qLower)) {
+            results.push({
+                type: 'market',
+                badge: m.category === 'Devises/Liquidités' ? 'Devise / Forex' : 'Action / ETF',
+                badgeColor: m.category === 'Devises/Liquidités'
+                    ? 'bg-blue-950 text-blue-300 border-blue-800/50'
+                    : 'bg-indigo-950 text-indigo-300 border-indigo-800/50',
+                name: m.name,
+                ticker: m.ticker,
+                category: m.category,
+                cadran: m.cadran,
+                taxCategory: m.taxCategory || 'NON_CONCERNE',
+                priceEUR: m.basePriceEUR
+            });
+        }
+    });
+
+    // 2bis) Catalogue Crypto (Correction 4)
+    cryptoCatalog.forEach(c => {
+        if (c.name.toLowerCase().includes(qLower) || c.ticker.toLowerCase().includes(qLower) || (c.isin || '').toLowerCase().includes(qLower)) {
+            results.push({
+                type: 'crypto',
+                badge: 'Crypto',
+                badgeColor: 'bg-purple-950 text-purple-300 border-purple-800/50',
+                name: c.name,
+                ticker: c.ticker,
+                tags: ['Crypto'],
+                cadran: 'CRYPTO',
+                taxCategory: 'NON_CONCERNE',
+                priceEUR: c.basePriceEUR
+            });
+        }
+    });
+
+    // 3) Détection directe des devises courantes
     if (qLower.includes('yen') || qLower === 'jpy') {
         if (!results.some(r => r.ticker === 'JPY')) {
             results.push({
@@ -834,8 +889,6 @@ async function triggerAssetSearch() {
     if (typeof finnhubApiKey !== 'undefined' && finnhubApiKey && query.length >= 2) {
         searchFinnhubSymbol(query).then(finnhubResults => {
             if (finnhubResults.length) {
-                // Si la requête ressemble à un ISIN, on le propage aux résultats
-                // (l'API Finnhub ne renvoie pas l'ISIN dans sa réponse)
                 const isIsinQuery = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/i.test(query);
                 const enriched = isIsinQuery
                     ? finnhubResults.map(r => ({ ...r, isin: query.toUpperCase() }))
@@ -887,14 +940,6 @@ function renderSearchResults(results) {
         div.className = 'p-2.5 hover:bg-gray-800/80 cursor-pointer transition flex items-center justify-between text-xs';
         div.onclick = () => selectSearchResult(item);
 
-        // ── SECURITY (audit B3) ──
-        // `item.badgeColor` est interpolé dans un attribut `class`.
-        // Aujourd'hui il provient de catalogues statiques, mais la fonction
-        // est aussi alimentée par `searchFinnhubSymbol()` (réponse API
-        // distante) : une réponse compromise pourrait injecter des
-        // attributs via des guillemets. On échappe par défense en profondeur.
-        // Note : les autres champs (`name`, `badge`, `ticker`, `category`)
-        // sont déjà échappés — le seul trou était `badgeColor`.
         const safeBadgeColor = escapeHTML(item.badgeColor || '');
         const safeName       = escapeHTML(item.name);
         const safeBadge      = escapeHTML(item.badge || '');
@@ -902,15 +947,27 @@ function renderSearchResults(results) {
         const safeCategory   = escapeHTML(item.category || '');
         const safePrice      = formatEUR(item.priceEUR);
 
+        // ⭐ Indicateur visuel pendant la résolution ISIN
+        const spinnerHTML = item._resolving
+            ? '<i class="fa-solid fa-spinner fa-spin text-[10px] text-amber-400 ml-1"></i>'
+            : (item._resolved ? '<i class="fa-solid fa-circle-check text-[10px] text-emerald-400 ml-1"></i>' : '');
+
+        // ⭐ Affiche le ticker Yahoo résolu si disponible
+        const yahooHint = item.yahooTicker
+            ? `<div class="text-[9px] text-emerald-300 font-mono mt-0.5">Yahoo : ${escapeHTML(item.yahooTicker)}</div>`
+            : '';
+
         div.innerHTML = `
-            <div>
-                <div class="font-bold text-white flex items-center gap-2">
-                    ${safeName}
-                    <span class="text-[9px] px-1.5 py-0.5 rounded border font-mono ${safeBadgeColor}">${safeBadge}</span>
+            <div class="min-w-0 flex-1">
+                <div class="font-bold text-white flex items-center gap-2 min-w-0">
+                    <span class="truncate">${safeName}</span>
+                    <span class="text-[9px] px-1.5 py-0.5 rounded border font-mono flex-shrink-0 ${safeBadgeColor}">${safeBadge}</span>
+                    ${spinnerHTML}
                 </div>
                 <div class="text-[10px] text-gray-400 font-mono">${safeTicker} • ${safeCategory}</div>
+                ${yahooHint}
             </div>
-            <div class="text-right font-mono font-bold text-emerald-400">
+            <div class="text-right font-mono font-bold text-emerald-400 flex-shrink-0 ml-2">
                 ${safePrice}
             </div>
         `;

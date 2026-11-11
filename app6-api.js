@@ -2843,3 +2843,145 @@ async function applyCompaction() {
 window.onCompactionYearsChange = onCompactionYearsChange;
 window.refreshCompactionPreview = refreshCompactionPreview;
 window.applyCompaction = applyCompaction;
+
+
+// =====================================================================
+// RÉSOLUTION ISIN → TICKER YAHOO (fix 2026)
+// ---------------------------------------------------------------------
+// Objectif : quand l'utilisateur tape un ISIN (ex: IE00B5L8K969), on
+// interroge des APIs publiques pour retrouver automatiquement le nom,
+// le ticker et le ticker Yahoo → la mise à jour des cours devient
+// automatique après ajout de l'actif.
+//
+// Sources (cascade) :
+//   1. OpenFIGI  — gratuit, 25 req/jour sans clé, couvre tous les ISIN
+//   2. Twelve Data — si clé configurée (800 req/jour)
+//   3. Finnhub — fallback US uniquement
+// =====================================================================
+
+// Mapping des codes de place OpenFIGI vers les suffixes Yahoo Finance
+const OPENFIGI_TO_YAHOO_SUFFIX = {
+    FP: '.PA',   // Euronext Paris
+    GR: '.DE',   // Xetra
+    GY: '.DE',   // Xetra (alias)
+    LN: '.L',    // London Stock Exchange
+    NA: '.AS',   // Euronext Amsterdam
+    SM: '.MC',   // BME Madrid
+    IM: '.MI',   // Borsa Italiana
+    SW: '.SW',   // SIX Swiss Exchange
+    BB: '.BR',   // Euronext Brussels
+    MU: '.MU',   // Börse München
+    US: '',      // US (NYSE, pas de suffixe Yahoo)
+    UW: '',      // US (NASDAQ Global Select)
+    UN: '',      // US (NYSE)
+    UQ: '',      // US (NASDAQ)
+    UA: '',      // US
+    UR: ''       // US
+};
+
+// Priorité des places : les plus courantes pour un investisseur FR d'abord
+const OPENFIGI_PRIORITY = ['FP', 'GR', 'GY', 'LN', 'NA', 'IM', 'SM', 'BB', 'MU', 'US', 'UW', 'UN', 'UQ', 'UA', 'UR'];
+
+async function resolveIsinToYahooTicker(isin) {
+    if (!/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/i.test(isin)) return null;
+    const upperIsin = isin.toUpperCase();
+
+    // ── 1) OpenFIGI ──
+    try {
+        const res = await fetch('https://api.openfigi.com/v3/mapping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify([{ idType: 'ID_ISIN', idValue: upperIsin }])
+        });
+        if (res.ok) {
+            const data = await res.json();
+            const items = (data && data[0] && data[0].data) || [];
+            if (items.length > 0) {
+                // Trie par priorité de place
+                items.sort((a, b) => {
+                    const ia = OPENFIGI_PRIORITY.indexOf(a.exchCode);
+                    const ib = OPENFIGI_PRIORITY.indexOf(b.exchCode);
+                    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+                });
+                const best = items[0];
+                const suffix = OPENFIGI_TO_YAHOO_SUFFIX[best.exchCode];
+                // Si le suffixe est undefined (place inconnue), on utilise le
+                // ticker brut sans suffixe (Yahoo tentera sa chance)
+                const yahooTicker = suffix !== undefined ? (best.ticker + suffix) : (best.ticker || '');
+                console.info(`[ISIN] ${upperIsin} → ${yahooTicker} (OpenFIGI, ${best.exchCode})`);
+                return {
+                    name:        best.name || `Actif ISIN ${upperIsin}`,
+                    ticker:      best.ticker || upperIsin.slice(0, 6),
+                    yahooTicker: yahooTicker,
+                    isin:        upperIsin,
+                    exchange:    best.exchCode || '',
+                    source:      'OpenFIGI'
+                };
+            }
+        }
+    } catch (err) {
+        console.warn('[ISIN] OpenFIGI échoué :', err.message);
+    }
+
+    // ── 2) Twelve Data ──
+    if (typeof twelveDataApiKey !== 'undefined' && twelveDataApiKey) {
+        try {
+            const res = await fetch(
+                `https://api.twelvedata.com/symbol_search?symbol=${encodeURIComponent(upperIsin)}&apikey=${encodeURIComponent(twelveDataApiKey)}`
+            );
+            if (res.ok) {
+                const data = await res.json();
+                const items = data.data || [];
+                if (items.length > 0) {
+                    const best = items[0];
+                    console.info(`[ISIN] ${upperIsin} → ${best.symbol} (Twelve Data)`);
+                    return {
+                        name:        best.instrument_name || `Actif ISIN ${upperIsin}`,
+                        ticker:      best.symbol || upperIsin.slice(0, 6),
+                        yahooTicker: best.symbol || '',
+                        isin:        upperIsin,
+                        exchange:    best.exchange || '',
+                        source:      'Twelve Data'
+                    };
+                }
+            }
+        } catch (err) {
+            console.warn('[ISIN] Twelve Data échoué :', err.message);
+        }
+    }
+
+    // ── 3) Finnhub (limité aux US) ──
+    if (typeof finnhubApiKey !== 'undefined' && finnhubApiKey) {
+        try {
+            const res = await fetch(
+                `https://finnhub.io/api/v1/search?q=${encodeURIComponent(upperIsin)}&token=${encodeURIComponent(finnhubApiKey)}`
+            );
+            if (res.ok) {
+                const data = await res.json();
+                const items = (data.result || []).filter(r =>
+                    r.type === 'Common Stock' || r.type === 'ETP' || r.type === 'ETFs'
+                );
+                if (items.length > 0) {
+                    const best = items[0];
+                    console.info(`[ISIN] ${upperIsin} → ${best.symbol} (Finnhub)`);
+                    return {
+                        name:        best.description || `Actif ISIN ${upperIsin}`,
+                        ticker:      best.symbol || upperIsin.slice(0, 6),
+                        yahooTicker: best.symbol || '',
+                        isin:        upperIsin,
+                        exchange:    best.exchange || '',
+                        source:      'Finnhub'
+                    };
+                }
+            }
+        } catch (err) {
+            console.warn('[ISIN] Finnhub échoué :', err.message);
+        }
+    }
+
+    console.warn(`[ISIN] ${upperIsin} → non résolu (toutes les sources ont échoué)`);
+    return null;
+}
+
+// Expose globalement
+window.resolveIsinToYahooTicker = resolveIsinToYahooTicker;
