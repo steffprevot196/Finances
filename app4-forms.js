@@ -747,9 +747,16 @@ async function triggerAssetSearch() {
     const isinRegex = /^[A-Z]{2}[A-Z0-9]{9}[0-9]$/i;
     if (isinRegex.test(query)) {
         const upperIsin = query.toUpperCase();
-        const isinResult = {
-            type: 'isin-generic',
-            badge: 'Recherche en cours…',
+        
+        // On vérifie d'abord si l'ISIN est déjà dans le catalogue local
+        const inCatalog = popularMarketAssets.some(a => (a.isin || '').toUpperCase() === upperIsin) ||
+                          (typeof auCoffreCatalog !== 'undefined' && auCoffreCatalog.some(a => (a.isin || '').toUpperCase() === upperIsin));
+
+        // Si on l'a en local, on n'affiche pas l'entrée générique (qui fait doublon)
+        if (!inCatalog) {
+            const isinResult = {
+                type: 'isin-generic',
+                badge: 'Recherche en cours…',
             badgeColor: 'bg-amber-950 text-amber-300 border-amber-800/50',
             name: `Actif ISIN ${upperIsin}`,
             ticker: upperIsin.slice(0, 6),

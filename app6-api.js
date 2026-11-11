@@ -2949,6 +2949,20 @@ async function resolveIsinToYahooTicker(isin) {
     if (!/^[A-Z]{2}[A-Z0-9]{9}[0-9]$/i.test(isin)) return null;
     const upperIsin = isin.toUpperCase();
 
+    // ── 0) Vérification dans le catalogue local (instantané et sans API) ──
+    const localMatch = popularMarketAssets.find(a => (a.isin || '').toUpperCase() === upperIsin) ||
+                       (typeof auCoffreCatalog !== 'undefined' && auCoffreCatalog.find(a => (a.isin || '').toUpperCase() === upperIsin));
+    if (localMatch) {
+        return {
+            name:        localMatch.name,
+            ticker:      localMatch.ticker,
+            yahooTicker: localMatch.yahooTicker || localMatch.ticker,
+            isin:        upperIsin,
+            exchange:    'Catalogue local',
+            source:      'Catalogue local'
+        };
+    }
+
     // ── 1) OpenFIGI ──
     try {
         const res = await fetch('https://api.openfigi.com/v3/mapping', {
