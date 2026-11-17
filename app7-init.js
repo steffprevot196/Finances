@@ -200,42 +200,16 @@ window.addEventListener('DOMContentLoaded', () => {
     }
 
     // 8n-bis-2. Activation PERMANENTE du délégateur CSP.
-    //          ⚠ INDISPENSABLE depuis le retrait de 'unsafe-inline' de la CSP
-    //          (index.html). Sans cet appel, TOUS les attributs onclick=,
-    //          onchange=, oninput=, onsubmit=… présents dans le HTML et dans
-    //          les chaînes innerHTML générées dynamiquement sont bloqués par
-    //          le navigateur → app inutilisable.
-    //
-    //          Le délégateur (app28-csp-audit.js) rejoue ces handlers sans
-    //          recourir à eval/Function (interdits par CSP). Couverture
-    //          contrôlable via reportCspReadiness() en console.
-    //
-    //          Un try/catch défensif évite qu'une erreur inattendue dans le
-    //          module CSP ne bloque tout le démarrage de l'application.
-    //          ⚠ FIX double-exécution : si la CSP (<meta>) autorise encore
-    //          'unsafe-inline' dans script-src, les onclick= s'exécutent déjà
-    //          nativement. Activer en plus le délégateur les rejouait une
-    //          2ᵉ fois (boutons de filtre qui s'annulent, crayon qui échoue
-    //          avec « ID manquant », etc.). On ne l'active donc QUE si les
-    //          handlers inline sont réellement bloqués.
-    const _cspMeta = document.querySelector('meta[http-equiv="Content-Security-Policy" i]');
-    const _scriptSrc = ((_cspMeta ? _cspMeta.content : '').match(/script-src[^;]*/i) || [''])[0];
-    const _inlineHandlersBlocked = !!_cspMeta && _scriptSrc !== '' && !/'unsafe-inline'/i.test(_scriptSrc);
-    if (!_inlineHandlersBlocked) {
-        // app28-csp-audit.js peut s'être activé tout seul au chargement : on le coupe.
-        if (typeof isCspFallbackDelegatorActive === 'function' &&
-            typeof disableCspFallbackDelegator === 'function' &&
-            isCspFallbackDelegatorActive()) {
-            try { disableCspFallbackDelegator(); } catch (e) { console.warn('[Boot] Désactivation du délégateur CSP échouée :', e); }
-        }
-        console.info("[Boot] 'unsafe-inline' autorisé par la CSP → délégateur CSP désactivé (évite la double exécution des handlers).");
-    } else if (typeof enableCspFallbackDelegator === 'function') {
+    //          Les gestionnaires sont écrits data-onclick="…", data-onchange="…" : aucun ne
+    //          s'exécute nativement, ils sont rejoués par le délégateur (app28-csp-audit.js)
+    //          sans eval/Function. Il est déjà activé au chargement de app28 ; on s'en assure
+    //          ici (couverture contrôlable avec reportCspReadiness() en console).
+    if (typeof enableCspFallbackDelegator === 'function' &&
+        !(typeof isCspFallbackDelegatorActive === 'function' && isCspFallbackDelegatorActive())) {
         try {
-            enableCspFallbackDelegator();
+            enableCspFallbackDelegator({ silent: true });
         } catch (err) {
             console.error('[Boot] Activation du délégateur CSP échouée :', err);
-            // L'app reste fonctionnelle en mode dégradé : les handlers
-            // inline échoueront, mais le reste du boot continue.
         }
     }
 
@@ -688,10 +662,13 @@ if (isinInput) {
             return;
         }
         if (e.key === 'Escape') {
-            // Si la palette est ouverte, c'est elle qui gère son propre Échap
-            const palette = document.getElementById('modal-command-palette');
-            if (palette && !palette.classList.contains('hidden')) return;
-            document.querySelectorAll('.fixed.inset-0:not(.hidden)').forEach(m => m.classList.add('hidden'));
+            // Échap déjà traité par un autre élément (palette, édition inline, menu d'en-tête…)
+            if (e.defaultPrevented) return;
+            // app45-a11y.js : ferme UNIQUEMENT la modale du dessus (les `modal-*`).
+            // L'ancien code masquait tout `.fixed.inset-0`, y compris l'overlay du
+            // menu mobile (#mobile-drawer-overlay), qui n'est jamais censé recevoir `hidden`.
+            if (typeof closeTopmostModal === 'function') { closeTopmostModal(); return; }
+            document.querySelectorAll('[id^="modal-"].fixed.inset-0:not(.hidden)').forEach(m => m.classList.add('hidden'));
         }
     });
 

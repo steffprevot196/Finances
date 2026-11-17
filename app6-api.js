@@ -206,21 +206,43 @@ const YAHOO_TICKER_FALLBACKS = {
     'IUES.AS': ['IUES.L']
 };
 
-async function fetchYahooQuote(symbol) {
+// Retourne { price, currency, symbol } ou null.
+//   • price    : cours dans la devise de COTATION réelle de la place (ex. 300 pour CEMA.L, qui
+//                cote en USD), pence déjà ramenés en livres quand Yahoo indique « GBp » ;
+//   • currency : devise indiquée par Yahoo ('USD', 'EUR', 'GBP'…), '' si Yahoo ne la donne pas ;
+//   • symbol   : symbole effectivement utilisé (le principal, ou un de ses alternatifs).
+async function fetchYahooQuoteDetailed(symbol) {
     // 1) Test du symbole principal
-    let price = await _fetchYahooQuoteRaw(symbol);
-    if (price !== null) return price;
+    let q = await _fetchYahooQuoteRaw(symbol);
+    if (q !== null) return Object.assign({ symbol }, q);
 
     // 2) Test des symboles alternatifs connus
     const fallbacks = YAHOO_TICKER_FALLBACKS[symbol] || [];
     for (const alt of fallbacks) {
-        price = await _fetchYahooQuoteRaw(alt);
-        if (price !== null) {
-            console.info(`[Yahoo] ${symbol} → fallback ${alt} utilisé (prix ${price})`);
-            return price;
+        q = await _fetchYahooQuoteRaw(alt);
+        if (q !== null) {
+            console.info(`[Yahoo] ${symbol} → fallback ${alt} utilisé (prix ${q.price} ${q.currency})`);
+            return Object.assign({ symbol: alt }, q);
         }
     }
     return null;
+}
+
+// Contrat HISTORIQUE conservé : un prix numérique, dans la devise de cotation (pas d'euros).
+// Utilisé tel quel par les métaux (GC=F / SI=F, en USD) et par la watchlist (devise native).
+async function fetchYahooQuote(symbol) {
+    const q = await fetchYahooQuoteDetailed(symbol);
+    return q ? q.price : null;
+}
+
+// Convertit un cours Yahoo en EUR (`value` et `invested` sont TOUJOURS en euros dans l'app).
+// Retourne null si le taux de change est indisponible : mieux vaut signaler un échec que
+// d'écrire une valeur fausse. Devise inconnue → comportement historique (EUR supposé).
+async function convertQuoteToEUR(price, currency) {
+    const cur = String(currency || '').toUpperCase();
+    if (!cur || cur === 'EUR') return price;
+    const rate = await getFxRateToEUR(cur);
+    return (Number.isFinite(rate) && rate > 0) ? price * rate : null;
 }
 
 // Extraction bas niveau du prix, avec correction pence→livres pour les .L.
@@ -248,11 +270,21 @@ async function _fetchYahooQuoteRaw(symbol) {
         let p = meta?.regularMarketPrice;
         if (!Number.isFinite(p) || p <= 0) return null;
 
-        // Correction pence → livres pour les symboles LSE
-        if (/\.L$/i.test(symbol) && p > 100) {
+        // Devise de cotation, telle que l'indique Yahoo ('GBp' = pence, 'GBP' = livres…).
+        // ⚠ BUG CORRIGÉ : l'ancienne règle « symbole en .L ET prix > 100 → pence » divisait par
+        // 100 les ETF cotés à Londres EN DOLLARS (CEMA.L ≈ 300 USD devenait 3,00) : la valeur
+        // de la position tombait à ~1 % de sa vraie valeur (« valeur ≈ 0, performance −100 % »).
+        let currency = String(meta?.currency || '').trim();
+        if (currency === 'GBp' || currency === 'GBX') {
+            p = p / 100;                 // pence → livres
+            currency = 'GBP';
+        } else if (currency) {
+            currency = currency.toUpperCase();
+        } else if (/\.L$/i.test(symbol) && p > 100) {
+            // Yahoo n'indique pas la devise : dernier recours, l'ancienne heuristique.
             p = p / 100;
         }
-        return p;
+        return { price: p, currency };
     } catch (err) {
         // Erreur réseau (timeout, CORS, etc.) : on laisse remonter pour
         // que la boucle principale puisse tenter un autre proxy ou un autre
@@ -1100,6 +1132,11 @@ async function _fetchWithRetry(url, options = {}, maxRetries = 3) {
     throw lastErr || new Error('Fetch failed after retries');
 }
 
+// Fraîcheur des cours (app46-price-freshness.js) — appels protégés : si le module
+// n'est pas chargé, l'actualisation des cours fonctionne exactement comme avant.
+function _pfUpdated(asset, source, ts) { if (typeof markPriceUpdated === 'function') markPriceUpdated(asset, source, ts); }
+function _pfFailed(asset, reason)      { if (typeof markPriceFailed  === 'function') markPriceFailed(asset, reason); }
+
 async function fetchLivePrices() {
     if (_priceFetchInProgress) {
         console.warn('[Prices] Actualisation déjà en cours — ignorée.');
@@ -1137,10 +1174,14 @@ async function fetchLivePrices() {
                     if (priceEUR) {
                         a.value = a.qty * priceEUR;
                         upsertTodayHistoryPoint(a, a.value, a.invested);
+                        _pfUpdated(a, 'coingecko');
                         updated++;
+                    } else {
+                        _pfFailed(a, 'prix absent de la réponse CoinGecko');
                     }
                 });
             } catch (err) {
+                cryptoAssets.forEach(a => _pfFailed(a, err.message));
                 sourceErrors.push(`Crypto (CoinGecko) : ${err.message}`);
             }
         }
@@ -1163,10 +1204,14 @@ async function fetchLivePrices() {
                     if (rate) {
                         a.value = a.qty * (1 / rate);
                         upsertTodayHistoryPoint(a, a.value, a.invested);
+                        _pfUpdated(a, 'frankfurter');
                         updated++;
+                    } else {
+                        _pfFailed(a, 'taux absent de la réponse Frankfurter');
                     }
                 });
             } catch (err) {
+                currencyAssets.forEach(a => _pfFailed(a, err.message));
                 sourceErrors.push(`Devises (Frankfurter) : ${err.message}`);
             }
         }
@@ -1198,8 +1243,16 @@ async function fetchLivePrices() {
             while (queue.length) {
                 const item = queue.shift();
                 try {
-                    const price = await fetchYahooQuote(item.symbol);
-                    yahooResults[item.symbol] = { price: price || null };
+                    const q = await fetchYahooQuoteDetailed(item.symbol);
+                    if (!q) {
+                        yahooResults[item.symbol] = { price: null };
+                    } else {
+                        // Yahoo cote dans la devise de la place (CEMA.L = USD) ; `value` est en EUR.
+                        const eur = await convertQuoteToEUR(q.price, q.currency);
+                        yahooResults[item.symbol] = eur
+                            ? { price: eur, quote: q.price, currency: q.currency }
+                            : { price: null, error: `taux de change ${q.currency} indisponible` };
+                    }
                 } catch (err) {
                     yahooResults[item.symbol] = { price: null, error: err.message };
                 }
@@ -1222,6 +1275,7 @@ async function fetchLivePrices() {
             if (r && r.price) {
                 a.value = a.qty * r.price;
                 upsertTodayHistoryPoint(a, a.value, a.invested);
+                _pfUpdated(a, 'yahoo');
                 updatedStockIds.add(a.id);
             }
         });
@@ -1268,9 +1322,11 @@ async function fetchLivePrices() {
                 if (price) {
                     a.value = a.qty * price;
                     upsertTodayHistoryPoint(a, a.value, a.invested);
+                    _pfUpdated(a, 'fallback');
                     updatedStockIds.add(a.id);
                 } else {
                     const yahooErr = yahooResults[symbol]?.error || 'aucune source';
+                    _pfFailed(a, yahooErr);
                     sourceErrors.push(`${a.name} (${symbol}) : ${yahooErr}`);
                 }
             }
@@ -1285,10 +1341,11 @@ async function fetchLivePrices() {
         if (metalResult.updated > 0) updated += metalResult.updated;
     } catch (err) { console.warn('AuCoffre update failed:', err); }
 
-    if (updated > 0) {
-        saveToStorage();
-        refreshAllUI();
-    }
+    // Même sans aucun cours récupéré, on enregistre et on réaffiche : les échecs
+    // sont notés sur chaque actif (badge « Échec actualisation »).
+    saveToStorage();
+    refreshAllUI();
+    if (typeof notifyAbnormalHistory === 'function') notifyAbnormalHistory();
 
     if (icon) icon.classList.remove('fa-spin');
     if (btn)  btn.disabled = false;
@@ -1382,6 +1439,7 @@ function saveManualRefresh() {
         const newValue = qty * newUnitValue;
         if (newValue === asset.value) return;
         asset.value = newValue;
+        _pfUpdated(asset, 'manual');
         upsertTodayHistoryPoint(asset, asset.value, asset.invested);
         updated++;
     });
@@ -1473,6 +1531,8 @@ function refreshAllUI() {
     if (typeof evaluateDca === 'function') evaluateDca();
 
     // Chantier §10 — section "Thèses à revoir" + histogramme annuel (accueil)
+    if (typeof renderPriceFreshnessSummary === 'function') renderPriceFreshnessSummary();
+
     if (activeTab === 'tab-accueil') {
         if (typeof renderThesesReviewSection === 'function') renderThesesReviewSection();
         if (typeof renderAnnualPnlChart === 'function') renderAnnualPnlChart();
@@ -1624,8 +1684,8 @@ function renderDriveBackupList() {
             <div class="flex justify-between items-center p-2 bg-gray-950 border border-gray-800 rounded-lg text-[11px] gap-2">
                 <span class="text-gray-300 truncate">${escapeHTML(b.label)}</span>
                 <span class="flex gap-1 flex-shrink-0">
-                    <button onclick="restoreLocalBackup(${i})" class="px-2 py-1 rounded bg-gray-800 hover:bg-indigo-700 text-white text-[10px]">Restaurer</button>
-                    <button onclick="deleteLocalBackup(${i})" class="px-2 py-1 rounded bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-[10px]" title="Supprimer cette sauvegarde">✕</button>
+                    <button data-onclick="restoreLocalBackup(${i})" class="px-2 py-1 rounded bg-gray-800 hover:bg-indigo-700 text-white text-[10px]">Restaurer</button>
+                    <button data-onclick="deleteLocalBackup(${i})" class="px-2 py-1 rounded bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-[10px]" title="Supprimer cette sauvegarde">✕</button>
                 </span>
             </div>`).reverse().join('')
         : '<div class="text-gray-500 italic text-[11px]">Aucune sauvegarde locale pour le moment.</div>';
@@ -1783,7 +1843,7 @@ async function listDriveBackups() {
                 <div class="text-[10px] text-indigo-300 uppercase tracking-wider font-bold">Dernière sauvegarde</div>
                 <div class="text-gray-200 font-mono truncate">${escapeHTML(latest.name)}</div>
                 <div class="text-[10px] text-gray-500">${new Date(latest.createdTime).toLocaleString('fr-FR')}</div>
-                <button onclick="pullFromDrive('${latest.id}')" class="w-full px-2 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium">
+                <button data-onclick="pullFromDrive('${latest.id}')" class="w-full px-2 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-medium">
                     ⬇ Restaurer la dernière
                 </button>
             </div>
@@ -1798,8 +1858,8 @@ async function listDriveBackups() {
                                 <div class="text-[9px] text-gray-500">${new Date(f.createdTime).toLocaleString('fr-FR')}</div>
                             </div>
                             <div class="flex gap-1 flex-shrink-0">
-                                <button onclick="pullFromDrive('${f.id}')" class="px-2 py-1 rounded bg-gray-800 hover:bg-indigo-700 text-white text-[10px]">Restaurer</button>
-                                <button onclick="deleteDriveBackup('${f.id}')" class="px-2 py-1 rounded bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-[10px]" title="Supprimer cette sauvegarde">✕</button>
+                                <button data-onclick="pullFromDrive('${f.id}')" class="px-2 py-1 rounded bg-gray-800 hover:bg-indigo-700 text-white text-[10px]">Restaurer</button>
+                                <button data-onclick="deleteDriveBackup('${f.id}')" class="px-2 py-1 rounded bg-rose-900/60 hover:bg-rose-800 text-rose-200 text-[10px]" title="Supprimer cette sauvegarde">✕</button>
                             </div>
                         </div>`).join('')}
                 </div>
@@ -2358,16 +2418,21 @@ async function updateAuCoffreAssetsFromGoldPrice() {
 
     if (!goldPrice && !silverPrice) {
         console.warn('[Metals] Aucun cours disponible (API Yahoo/Stooq en échec)');
+        metalAssets.forEach(a => _pfFailed(a, 'API Yahoo/Stooq indisponible'));
+        saveToStorage();
         return { updated: 0, enriched, error: 'Cours de l\'or/argent indisponible (API en échec).' };
     }
 
     let updated = 0;
+    let stamped = 0;
     metalAssets.forEach(a => {
         try {
             const metal = _detectMetalType(a);
             const pricePerGram = metal === 'silver' ? silverPrice : goldPrice;
 
-            if (!pricePerGram) return;
+            if (!pricePerGram) { _pfFailed(a, 'cours ' + (metal === 'silver' ? 'de l\'argent' : 'de l\'or') + ' indisponible'); stamped++; return; }
+            // Cours bien reçu, même si la valeur ne change pas : on date la mise à jour
+            _pfUpdated(a, 'metals'); stamped++;
 
             const prime = Number(a.primePct) || 0;
             const estimatedValue = a.qty * a.weightGrams * pricePerGram * (1 + prime);
@@ -2382,7 +2447,7 @@ async function updateAuCoffreAssetsFromGoldPrice() {
         }
     });
 
-    if (updated > 0 || enriched > 0) saveToStorage();
+    if (updated > 0 || enriched > 0 || stamped > 0) saveToStorage();
 
     return { updated, enriched, error: null };
 }
@@ -2401,11 +2466,11 @@ async function forceRefreshMetals() {
     try { localStorage.removeItem(METALS_CACHE_KEY); } catch (_) {}
     
     const result = await updateAuCoffreAssetsFromGoldPrice();
+    if (typeof refreshAllUI === 'function') refreshAllUI();   // met à jour les badges de fraîcheur
     
     if (result.error) {
         if (typeof toastError === 'function') toastError('Or & Argent', result.error);
     } else if (result.updated > 0) {
-        if (typeof refreshAllUI === 'function') refreshAllUI();
         if (typeof toastSuccess === 'function') toastSuccess('Or & Argent', `${result.updated} actif(s) valorisé(s).`);
     } else {
         if (typeof toastInfo === 'function') toastInfo('Or & Argent', 'Cours inchangés (ou pas de variation détectée).');
@@ -2443,6 +2508,7 @@ function handleManualGoldUpdate(e) {
     asset.manualValueOverride = true;
     asset.manualUpdateDate = updateDate;
     asset.manualUpdateSource = source;
+    _pfUpdated(asset, 'manual', updateDate ? new Date(updateDate).getTime() : undefined);
     const dateFR = new Date(updateDate).toLocaleDateString('fr-FR');
     asset.history = (asset.history || []).filter(h => h.date !== dateFR);
     asset.history.push({ date: dateFR, value: asset.value, invested: asset.invested });

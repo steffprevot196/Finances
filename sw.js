@@ -15,7 +15,7 @@
 // « fantômes » impossibles à reproduire en DevTools.
 // =====================================================================
 
-const SW_VERSION = 'v1.0.38';                   // ← Bumper à chaque deploy
+const SW_VERSION = 'v1.0.47';                   // ← Bumper à chaque deploy
 const CACHE_PREFIX = 'patrimonial';
 const CACHE_STATIC = `${CACHE_PREFIX}-static-${SW_VERSION}`;
 const CACHE_CDN    = `${CACHE_PREFIX}-cdn-${SW_VERSION}`;
@@ -79,8 +79,10 @@ const APP_SHELL = [
     './app42-dead-lines.js',
     './app43-mc-worker.js',
     './app44-tab-filters.js',
+    './app45-a11y.js',
+    './app46-price-freshness.js',
+    './app47-csp-handlers.js',
     './monte-carlo-worker.js',
-    './tests.js',
     './app7-init.js'
 ];
 
@@ -89,7 +91,7 @@ const APP_SHELL = [
 const CDN_PRECACHE = [
     'https://cdn.tailwindcss.com',
     'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
-    'https://cdn.jsdelivr.net/npm/chart.js',
+    'https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js',
     'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
     'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap'
 ];
