@@ -2109,7 +2109,7 @@ function handleImportCSVFile(e) {
         try {
             if (typeof XLSX === 'undefined') {
                 try { await ensureXLSX(); }
-                catch (_) { alert('SheetJS n\'a pas pu être chargé — vérifiez votre connexion internet.'); return; }
+                catch (_) { alert('SheetJS n\'a pas pu être chargé — rechargez la page (Ctrl+Maj+R) et réessayez.'); return; }
             }
             const data = new Uint8Array(ev.target.result);
             const wb = XLSX.read(data, { type: 'array', cellDates: true });
